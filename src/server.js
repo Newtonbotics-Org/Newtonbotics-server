@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('path');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
@@ -99,6 +100,11 @@ app.use(compression());
 // Logging middleware
 app.use(morgan('combined', { stream: { write: message => logger.info(message.trim()) } }));
 
+// Root endpoint - serve the public HTML
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({
@@ -107,6 +113,9 @@ app.get('/health', (req, res) => {
     uptime: process.uptime(),
     environment: process.env.NODE_ENV,
     version: require('../package.json').version,
+    message: 'NewtonBotics Backend API is running',
+    database: process.env.MONGODB_URI ? 'Connected' : 'Not configured',
+    redis: (process.env.REDIS_HOST && process.env.REDIS_PORT) ? 'Configured' : 'Not configured'
   });
 });
 
@@ -134,16 +143,24 @@ app.use(errorHandler);
 // Start server
 async function startServer() {
   try {
-    // Connect to MongoDB
-    await connectDB();
-    logger.info('✅ Connected to MongoDB');
+    // Connect to MongoDB only if MONGODB_URI is available
+    if (process.env.MONGODB_URI) {
+      await connectDB();
+      logger.info('✅ Connected to MongoDB');
+    } else {
+      logger.warn('⚠️ MONGODB_URI not found, skipping database connection');
+    }
 
     // Connect to Redis (optional in dev)
-    try {
-      await connectRedis();
-      logger.info('✅ Connected to Redis');
-    } catch (redisError) {
-      logger.warn(`⚠️ Redis not available: ${redisError.message}. Continuing without Redis.`);
+    if (process.env.REDIS_HOST && process.env.REDIS_PORT) {
+      try {
+        await connectRedis();
+        logger.info('✅ Connected to Redis');
+      } catch (redisError) {
+        logger.warn(`⚠️ Redis not available: ${redisError.message}. Continuing without Redis.`);
+      }
+    } else {
+      logger.warn('⚠️ Redis configuration not found, skipping Redis connection');
     }
 
     // Start HTTP server
@@ -153,30 +170,45 @@ async function startServer() {
       logger.info(`🔗 Health Check: http://${HOST}:${PORT}/health`);
     });
 
-    // Setup Socket.IO
-    setupSocketIO(server);
-    logger.info('✅ Socket.IO initialized');
+    // Setup Socket.IO only if we have a server
+    if (server) {
+      setupSocketIO(server);
+      logger.info('✅ Socket.IO initialized');
+    }
 
     // Graceful shutdown
     process.on('SIGTERM', () => {
       logger.info('SIGTERM received, shutting down gracefully');
-      server.close(() => {
-        logger.info('Process terminated');
+      if (server) {
+        server.close(() => {
+          logger.info('Process terminated');
+          process.exit(0);
+        });
+      } else {
         process.exit(0);
-      });
+      }
     });
 
     process.on('SIGINT', () => {
       logger.info('SIGINT received, shutting down gracefully');
-      server.close(() => {
-        logger.info('Process terminated');
+      if (server) {
+        server.close(() => {
+          logger.info('Process terminated');
+          process.exit(0);
+        });
+      } else {
         process.exit(0);
-      });
+      }
     });
 
   } catch (error) {
     logger.error('❌ Failed to start server:', error);
-    process.exit(1);
+    // Don't exit on Vercel, just log the error
+    if (process.env.NODE_ENV === 'production') {
+      logger.error('Running in production mode, continuing without database connection');
+    } else {
+      process.exit(1);
+    }
   }
 }
 
