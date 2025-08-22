@@ -2,10 +2,20 @@ const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
 
-// Create logs directory if it doesn't exist
-const logsDir = path.join(process.cwd(), 'logs');
-if (!fs.existsSync(logsDir)) {
-  fs.mkdirSync(logsDir, { recursive: true });
+// Check if we're in a Vercel environment (serverless)
+const isVercel = process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
+
+// Create logs directory only if not in Vercel and directory doesn't exist
+let logsDir;
+if (!isVercel) {
+  logsDir = path.join(process.cwd(), 'logs');
+  if (!fs.existsSync(logsDir)) {
+    try {
+      fs.mkdirSync(logsDir, { recursive: true });
+    } catch (error) {
+      console.warn('Could not create logs directory:', error.message);
+    }
+  }
 }
 
 // Define log levels
@@ -56,30 +66,37 @@ const fileFormat = winston.format.combine(
 
 // Define transports
 const transports = [
-  // Console transport
+  // Console transport (always available)
   new winston.transports.Console({
     format,
     level: level(),
   }),
-  
-  // File transport for all logs
-  new winston.transports.File({
-    filename: path.join(logsDir, 'app.log'),
-    format: fileFormat,
-    level: level(),
-    maxsize: 5242880, // 5MB
-    maxFiles: 5,
-  }),
-  
-  // File transport for error logs only
-  new winston.transports.File({
-    filename: path.join(logsDir, 'error.log'),
-    format: fileFormat,
-    level: 'error',
-    maxsize: 5242880, // 5MB
-    maxFiles: 5,
-  }),
 ];
+
+// Add file transports only if not in Vercel and logs directory exists
+if (!isVercel && logsDir) {
+  try {
+    // File transport for all logs
+    transports.push(new winston.transports.File({
+      filename: path.join(logsDir, 'app.log'),
+      format: fileFormat,
+      level: level(),
+      maxsize: 5242880, // 5MB
+      maxFiles: 5,
+    }));
+    
+    // File transport for error logs only
+    transports.push(new winston.transports.File({
+      filename: path.join(logsDir, 'error.log'),
+      format: fileFormat,
+      level: 'error',
+      maxsize: 5242880, // 5MB
+      maxFiles: 5,
+    }));
+  } catch (error) {
+    console.warn('Could not add file transports:', error.message);
+  }
+}
 
 // Create the logger
 const logger = winston.createLogger({
