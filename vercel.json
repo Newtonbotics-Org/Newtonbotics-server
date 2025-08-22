@@ -12,10 +12,5 @@
       "dest": "/dist/server.js"
     }
   ],
-  "outputDirectory": "dist",
-  "functions": {
-    "dist/server.js": {
-      "maxDuration": 30
-    }
-  }
+  "outputDirectory": "dist"
 }
