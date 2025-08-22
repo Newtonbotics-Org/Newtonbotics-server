@@ -25,7 +25,6 @@ const connectDB = async () => {
       socketTimeoutMS: 10000, // Reduced timeout
       connectTimeoutMS: 3000, // Connection timeout
       bufferCommands: false, // Disable buffering for serverless
-      bufferMaxEntries: 0, // Disable buffering
     };
 
     await mongoose.connect(mongoURI, options);
