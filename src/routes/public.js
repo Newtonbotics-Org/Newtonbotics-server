@@ -5,8 +5,33 @@ const News = require('../models/News');
 const User = require('../models/User');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { getRedisClient } = require('../config/redis');
+const { getConnectionStatus } = require('../config/database');
 
 const isRedisEnabled = () => process.env.REDIS_ENABLED === 'true';
+
+// Helper function to check database connection
+const checkDatabaseConnection = () => {
+  const status = getConnectionStatus();
+  if (!status.isConnected && !status.hasMongoURI) {
+    return {
+      success: false,
+      error: {
+        message: 'Database not configured. Please set MONGODB_URI environment variable.',
+        code: 'DATABASE_NOT_CONFIGURED'
+      }
+    };
+  }
+  if (!status.isConnected) {
+    return {
+      success: false,
+      error: {
+        message: 'Database connection failed. Please check your MongoDB connection.',
+        code: 'DATABASE_CONNECTION_FAILED'
+      }
+    };
+  }
+  return null; // No error
+};
 
 // Common projection for public user profiles (never expose passwordHash or sensitive fields)
 const publicUserProjection = {
@@ -149,6 +174,17 @@ router.get(
 
 // Helper function for role-specific endpoints
 const getPeopleByRole = (targetRole) => asyncHandler(async (req, res) => {
+  // Check database connection first
+  const dbError = checkDatabaseConnection();
+  if (dbError) {
+    return res.status(503).json({
+      ...dbError,
+      timestamp: new Date().toISOString(),
+      path: req.path,
+      method: req.method
+    });
+  }
+
   const { q, department } = req.query;
   const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
   const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
@@ -157,28 +193,52 @@ const getPeopleByRole = (targetRole) => asyncHandler(async (req, res) => {
   if (department) filter.department = department;
   if (q) filter.$text = { $search: q };
 
-  const [users, total] = await Promise.all([
-    User.find(filter)
-      .select(publicUserProjection)
-      .limit(limit)
-      .skip(skip)
-      .sort({ role: 1, createdAt: -1 }),
-    User.countDocuments(filter),
-  ]);
+  try {
+    const [users, total] = await Promise.all([
+      User.find(filter)
+        .select(publicUserProjection)
+        .limit(limit)
+        .skip(skip)
+        .sort({ role: 1, createdAt: -1 }),
+      User.countDocuments(filter),
+    ]);
 
-  const items = users.map(mapPublicUser);
+    const items = users.map(mapPublicUser);
 
-  res.json({
-    success: true,
-    data: {
-      items,
-      pagination: { total, limit, skip, hasMore: total > skip + items.length },
-    },
-  });
+    res.json({
+      success: true,
+      data: {
+        items,
+        pagination: { total, limit, skip, hasMore: total > skip + items.length },
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        message: 'Database operation failed',
+        details: error.message
+      },
+      timestamp: new Date().toISOString(),
+      path: req.path,
+      method: req.method
+    });
+  }
 });
 
 // Leadership Team - team members with at least one subrole
 router.get('/leadership-team', asyncHandler(async (req, res) => {
+  // Check database connection first
+  const dbError = checkDatabaseConnection();
+  if (dbError) {
+    return res.status(503).json({
+      ...dbError,
+      timestamp: new Date().toISOString(),
+      path: req.path,
+      method: req.method
+    });
+  }
+
   const { q, department } = req.query;
   const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
   const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
@@ -192,28 +252,52 @@ router.get('/leadership-team', asyncHandler(async (req, res) => {
   if (department) filter.department = department;
   if (q) filter.$text = { $search: q };
 
-  const [users, total] = await Promise.all([
-    User.find(filter)
-      .select(publicUserProjection)
-      .limit(limit)
-      .skip(skip)
-      .sort({ 'subroles.0': 1, firstName: 1 }),
-    User.countDocuments(filter),
-  ]);
+  try {
+    const [users, total] = await Promise.all([
+      User.find(filter)
+        .select(publicUserProjection)
+        .limit(limit)
+        .skip(skip)
+        .sort({ 'subroles.0': 1, firstName: 1 }),
+      User.countDocuments(filter),
+    ]);
 
-  const items = users.map(mapPublicUser);
+    const items = users.map(mapPublicUser);
 
-  res.json({
-    success: true,
-    data: {
-      items,
-      pagination: { total, limit, skip, hasMore: total > skip + items.length },
-    },
-  });
+    res.json({
+      success: true,
+      data: {
+        items,
+        pagination: { total, limit, skip, hasMore: total > skip + items.length },
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        message: 'Database operation failed',
+        details: error.message
+      },
+      timestamp: new Date().toISOString(),
+      path: req.path,
+      method: req.method
+    });
+  }
 }));
 
 // Team Directory - team members with NO subroles (basic team members)
 router.get('/team-directory', asyncHandler(async (req, res) => {
+  // Check database connection first
+  const dbError = checkDatabaseConnection();
+  if (dbError) {
+    return res.status(503).json({
+      ...dbError,
+      timestamp: new Date().toISOString(),
+      path: req.path,
+      method: req.method
+    });
+  }
+
   const { q, department } = req.query;
   const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
   const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
@@ -231,24 +315,37 @@ router.get('/team-directory', asyncHandler(async (req, res) => {
   if (department) filter.department = department;
   if (q) filter.$text = { $search: q };
 
-  const [users, total] = await Promise.all([
-    User.find(filter)
-      .select(publicUserProjection)
-      .limit(limit)
-      .skip(skip)
-      .sort({ firstName: 1 }),
-    User.countDocuments(filter),
-  ]);
+  try {
+    const [users, total] = await Promise.all([
+      User.find(filter)
+        .select(publicUserProjection)
+        .limit(limit)
+        .skip(skip)
+        .sort({ firstName: 1 }),
+      User.countDocuments(filter),
+    ]);
 
-  const items = users.map(mapPublicUser);
+    const items = users.map(mapPublicUser);
 
-  res.json({
-    success: true,
-    data: {
-      items,
-      pagination: { total, limit, skip, hasMore: total > skip + items.length },
-    },
-  });
+    res.json({
+      success: true,
+      data: {
+        items,
+        pagination: { total, limit, skip, hasMore: total > skip + items.length },
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: {
+        message: 'Database operation failed',
+        details: error.message
+      },
+      timestamp: new Date().toISOString(),
+      path: req.path,
+      method: req.method
+    });
+  }
 }));
 
 // Shortcut endpoints

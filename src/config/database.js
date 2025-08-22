@@ -15,13 +15,17 @@ const connectDB = async () => {
       : process.env.MONGODB_URI;
 
     if (!mongoURI) {
-      throw new Error('MongoDB URI is not defined in environment variables');
+      logger.warn('MongoDB URI is not defined in environment variables');
+      return false;
     }
 
     const options = {
-      maxPoolSize: 10,
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
+      maxPoolSize: 5, // Reduced for serverless
+      serverSelectionTimeoutMS: 3000, // Faster timeout for Vercel
+      socketTimeoutMS: 10000, // Reduced timeout
+      connectTimeoutMS: 3000, // Connection timeout
+      bufferCommands: false, // Disable buffering for serverless
+      bufferMaxEntries: 0, // Disable buffering
     };
 
     await mongoose.connect(mongoURI, options);
@@ -81,9 +85,10 @@ const getConnectionStatus = () => {
   return {
     isConnected,
     readyState: mongoose.connection.readyState,
-    host: mongoose.connection.host,
-    port: mongoose.connection.port,
-    name: mongoose.connection.name,
+    host: mongoose.connection.host || 'Not connected',
+    port: mongoose.connection.port || 'Not connected',
+    name: mongoose.connection.name || 'Not connected',
+    hasMongoURI: !!process.env.MONGODB_URI,
   };
 };
 
