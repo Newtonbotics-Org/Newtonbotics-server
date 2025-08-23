@@ -118,6 +118,11 @@ async function seedProjects({ mentor, teamLeader, members }) {
     teamLeaderId: teamLeader._id,
     achievements: ['Won campus demo day'],
     tags: ['ros', 'slam', 'lidar'],
+    imageUrls: [
+      'https://images.unsplash.com/photo-1485827404703-89b55fcc595e?w=800&h=600&fit=crop',
+      'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&h=600&fit=crop',
+      'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=800&h=600&fit=crop'
+    ],
     milestones: [
       { title: 'Chassis Assembly', description: 'Assemble rover body', dueDate: chassisDue, status: 'completed', completedAt: chassisDue },
       { title: 'Sensor Integration', description: 'Integrate LIDAR and IMU', dueDate: sensorsDue, status: 'completed', completedAt: sensorsDue },
@@ -138,6 +143,10 @@ async function seedProjects({ mentor, teamLeader, members }) {
     budget: 3000,
     mentorId: mentor._id,
     teamLeaderId: teamLeader._id,
+    imageUrls: [
+      'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&h=600&fit=crop',
+      'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800&h=600&fit=crop'
+    ],
     milestones: [
       { title: 'CAD Design', description: 'Design arm in CAD', dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) },
     ],
@@ -160,12 +169,92 @@ async function seedProjects({ mentor, teamLeader, members }) {
     mentorId: mentor._id,
     teamLeaderId: teamLeader._id,
     achievements: ['Published internal whitepaper'],
+    imageUrls: [
+      'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800&h=600&fit=crop',
+      'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=800&h=600&fit=crop',
+      'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&h=600&fit=crop'
+    ],
     milestones: [
       { title: 'Model Selection', dueDate: modelSelDue, status: 'completed', completedAt: modelSelDue },
       { title: 'Edge Optimization', dueDate: edgeOptDue, status: 'completed', completedAt: edgeOptDue },
     ],
     teamMembers: [
       { userId: members[1]._id, role: 'ML Engineer', skills: ['Python', 'TensorRT'] },
+    ],
+  }));
+
+  // Add more diverse projects
+  projects.push(new Project({
+    title: 'Smart Home Automation',
+    description: 'IoT-based home automation system with voice control and mobile app integration.',
+    category: 'IoT',
+    status: 'ongoing',
+    startDate: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000),
+    budget: 4000,
+    mentorId: mentor._id,
+    teamLeaderId: teamLeader._id,
+    imageUrls: [
+      'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=800&h=600&fit=crop',
+      'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=800&h=600&fit=crop'
+    ],
+    tags: ['iot', 'automation', 'voice-control', 'mobile-app'],
+    milestones: [
+      { title: 'Hardware Setup', description: 'Install sensors and actuators', dueDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000), status: 'in_progress' },
+      { title: 'App Development', description: 'Develop mobile control app', dueDate: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000), status: 'pending' },
+    ],
+    teamMembers: [
+      { userId: members[0]._id, role: 'IoT Developer', skills: ['Arduino', 'ESP32'] },
+      { userId: members[1]._id, role: 'App Developer', skills: ['React Native', 'Firebase'] },
+    ],
+  }));
+
+  projects.push(new Project({
+    title: 'Drone Surveillance System',
+    description: 'Autonomous drone with computer vision for surveillance and monitoring applications.',
+    category: 'Computer Vision',
+    status: 'upcoming',
+    startDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
+    budget: 8000,
+    mentorId: mentor._id,
+    teamLeaderId: teamLeader._id,
+    imageUrls: [
+      'https://images.unsplash.com/photo-1579829366248-204fe8413f31?w=800&h=600&fit=crop',
+      'https://images.unsplash.com/photo-1485827404703-89b55fcc595e?w=800&h=600&fit=crop'
+    ],
+    tags: ['drone', 'surveillance', 'computer-vision', 'autonomous'],
+    milestones: [
+      { title: 'Drone Assembly', description: 'Build and test drone frame', dueDate: new Date(Date.now() + 25 * 24 * 60 * 60 * 1000), status: 'pending' },
+      { title: 'Vision System', description: 'Implement object detection', dueDate: new Date(Date.now() + 40 * 24 * 60 * 60 * 1000), status: 'pending' },
+    ],
+    teamMembers: [
+      { userId: members[0]._id, role: 'Drone Engineer', skills: ['Flight Control', 'PID Tuning'] },
+      { userId: members[1]._id, role: 'Computer Vision Engineer', skills: ['OpenCV', 'YOLO'] },
+    ],
+  }));
+
+  projects.push(new Project({
+    title: 'Gesture Control Interface',
+    description: 'Hand gesture recognition system for controlling devices without physical contact.',
+    category: 'Human-Computer Interaction',
+    status: 'completed',
+    startDate: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+    endDate: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000),
+    budget: 1500,
+    mentorId: mentor._id,
+    teamLeaderId: teamLeader._id,
+    achievements: ['Demo at university open house', 'Featured in local tech blog'],
+    imageUrls: [
+      'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800&h=600&fit=crop',
+      'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&h=600&fit=crop'
+    ],
+    tags: ['gesture-recognition', 'computer-vision', 'interface', 'contactless'],
+    milestones: [
+      { title: 'Algorithm Development', dueDate: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000), status: 'completed', completedAt: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000) },
+      { title: 'Hardware Integration', dueDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), status: 'completed', completedAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+    ],
+    teamMembers: [
+      { userId: members[0]._id, role: 'Algorithm Developer', skills: ['Python', 'OpenCV'] },
+      { userId: members[1]._id, role: 'Hardware Engineer', skills: ['Arduino', 'Sensors'] },
     ],
   }));
 
@@ -760,33 +849,357 @@ async function seedNewsApplications({ users }) {
 }
 
 async function seedMedia({ uploader }) {
-  const count = await Media.countDocuments();
-  if (count > 0) {
-    console.log('Media already exist, skipping media seeding');
-    return;
-  }
-  const catPhotos = await MediaCategory.create({ name: 'Photos', description: 'Event photos' });
-  const media1 = await Media.create({
-    title: 'Team Photo',
-    description: 'Showcase team picture',
-    fileUrl: 'https://example.com/media/team-photo.jpg',
-    thumbnailUrl: 'https://example.com/media/team-photo-thumb.jpg',
-    fileType: 'image',
-    fileSize: 1024 * 250,
-    categoryId: catPhotos._id,
-    uploadedBy: uploader._id,
-    tags: ['team'],
-    isFeatured: true,
-  });
-  await MediaCollection.create({
-    name: 'Showcase Gallery',
-    description: 'Photos from showcase',
-    coverMediaId: media1._id,
-    isPublic: true,
-    createdBy: uploader._id,
-    mediaItems: [{ mediaId: media1._id, position: 1 }],
-  });
-  console.log('Seeded media and collections');
+  // Clear existing media data for fresh seeding
+  await Media.deleteMany({});
+  await MediaCategory.deleteMany({});
+  await MediaCollection.deleteMany({});
+  
+  console.log('Seeding comprehensive media data...');
+
+  // Create media categories
+  const categories = await MediaCategory.create([
+    { name: 'Team Photos', description: 'Photos of team members, group activities, and team building events' },
+    { name: 'Competition Videos', description: 'Videos from robotics competitions, challenges, and tournaments' },
+    { name: 'Project Documentation', description: 'Documentation, diagrams, and technical drawings of projects' },
+    { name: 'Workshop Materials', description: 'Presentation slides, handouts, and workshop recordings' },
+    { name: 'Research Presentations', description: 'Conference presentations, research posters, and academic materials' },
+    { name: 'Lab Equipment', description: 'Photos and videos of lab equipment, tools, and facilities' },
+    { name: 'Event Coverage', description: 'Photos and videos from events, seminars, and outreach programs' },
+    { name: 'Tutorial Videos', description: 'Educational content, how-to guides, and tutorial videos' }
+  ]);
+
+  console.log(`Created ${categories.length} media categories`);
+
+  // Create comprehensive media files
+  const mediaFiles = await Media.create([
+    // Team Photos
+    {
+      title: 'Team Photo 2024',
+      description: 'Annual team photo from robotics competition season',
+      fileUrl: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=800&h=600&fit=crop',
+      thumbnailUrl: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=400&h=300&fit=crop',
+      fileType: 'image',
+      fileSize: 2048576,
+      dimensions: '1920x1080',
+      categoryId: categories[0]._id,
+      uploadedBy: uploader._id,
+      tags: ['team', 'competition', '2024', 'group'],
+      isFeatured: true,
+      viewCount: 156
+    },
+    {
+      title: 'Lab Working Session',
+      description: 'Team members collaborating on autonomous rover project',
+      fileUrl: 'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&h=600&fit=crop',
+      thumbnailUrl: 'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=400&h=300&fit=crop',
+      fileType: 'image',
+      fileSize: 1856320,
+      dimensions: '1920x1080',
+      categoryId: categories[0]._id,
+      uploadedBy: uploader._id,
+      tags: ['lab', 'collaboration', 'project', 'working'],
+      isFeatured: false,
+      viewCount: 89
+    },
+    {
+      title: 'Competition Celebration',
+      description: 'Team celebrating after winning first place in regional competition',
+      fileUrl: 'https://images.unsplash.com/photo-1552664730-d307ca884978?w=800&h=600&fit=crop',
+      thumbnailUrl: 'https://images.unsplash.com/photo-1552664730-d307ca884978?w=400&h=300&fit=crop',
+      fileType: 'image',
+      fileSize: 2150400,
+      dimensions: '1920x1080',
+      categoryId: categories[0]._id,
+      uploadedBy: uploader._id,
+      tags: ['celebration', 'victory', 'competition', 'success'],
+      isFeatured: true,
+      viewCount: 234
+    },
+
+    // Competition Videos
+    {
+      title: 'Final Round Competition',
+      description: 'Complete video of the final round from robotics championship',
+      fileUrl: 'https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_1mb.mp4',
+      thumbnailUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=400&h=300&fit=crop',
+      fileType: 'video',
+      fileSize: 52428800,
+      dimensions: '1280x720',
+      duration: 180,
+      categoryId: categories[1]._id,
+      uploadedBy: uploader._id,
+      tags: ['competition', 'final', 'championship', 'robotics'],
+      isFeatured: true,
+      viewCount: 567
+    },
+    {
+      title: 'Robot Testing Session',
+      description: 'Testing autonomous navigation algorithms in controlled environment',
+      fileUrl: 'https://sample-videos.com/zip/10/mp4/SampleVideo_640x360_1mb.mp4',
+      thumbnailUrl: 'https://images.unsplash.com/photo-1485827404703-89b55fcc595e?w=400&h=300&fit=crop',
+      fileType: 'video',
+      fileSize: 20971520,
+      dimensions: '640x360',
+      duration: 120,
+      categoryId: categories[1]._id,
+      uploadedBy: uploader._id,
+      tags: ['testing', 'autonomous', 'navigation', 'algorithm'],
+      isFeatured: false,
+      viewCount: 123
+    },
+
+    // Project Documentation
+    {
+      title: 'Autonomous Rover Schematic',
+      description: 'Technical schematic and wiring diagram for autonomous rover project',
+      fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+      thumbnailUrl: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=400&h=300&fit=crop',
+      fileType: 'document',
+      fileSize: 1048576,
+      categoryId: categories[2]._id,
+      uploadedBy: uploader._id,
+      tags: ['schematic', 'rover', 'technical', 'diagram'],
+      isFeatured: true,
+      viewCount: 78
+    },
+    {
+      title: 'Robotic Arm CAD Model',
+      description: '3D CAD model and technical specifications for robotic arm project',
+      fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+      thumbnailUrl: 'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=400&h=300&fit=crop',
+      fileType: 'document',
+      fileSize: 2097152,
+      categoryId: categories[2]._id,
+      uploadedBy: uploader._id,
+      tags: ['CAD', 'robotic-arm', '3D-model', 'specifications'],
+      isFeatured: false,
+      viewCount: 45
+    },
+
+    // Workshop Materials
+    {
+      title: 'Introduction to Robotics Workshop',
+      description: 'Complete presentation slides from beginner robotics workshop',
+      fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+      thumbnailUrl: 'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?w=400&h=300&fit=crop',
+      fileType: 'document',
+      fileSize: 1572864,
+      categoryId: categories[3]._id,
+      uploadedBy: uploader._id,
+      tags: ['workshop', 'robotics', 'beginner', 'presentation'],
+      isFeatured: true,
+      viewCount: 189
+    },
+    {
+      title: 'Arduino Programming Tutorial',
+      description: 'Step-by-step tutorial video for Arduino programming basics',
+      fileUrl: 'https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_2mb.mp4',
+      thumbnailUrl: 'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=400&h=300&fit=crop',
+      fileType: 'video',
+      fileSize: 41943040,
+      dimensions: '1280x720',
+      duration: 600,
+      categoryId: categories[3]._id,
+      uploadedBy: uploader._id,
+      tags: ['tutorial', 'arduino', 'programming', 'basics'],
+      isFeatured: true,
+      viewCount: 312
+    },
+
+    // Research Presentations
+    {
+      title: 'SLAM Algorithm Research',
+      description: 'Research presentation on Simultaneous Localization and Mapping algorithms',
+      fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+      thumbnailUrl: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=400&h=300&fit=crop',
+      fileType: 'document',
+      fileSize: 3145728,
+      categoryId: categories[4]._id,
+      uploadedBy: uploader._id,
+      tags: ['research', 'SLAM', 'algorithm', 'presentation'],
+      isFeatured: true,
+      viewCount: 67
+    },
+    {
+      title: 'Computer Vision Applications',
+      description: 'Research poster on computer vision applications in robotics',
+      fileUrl: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=800&h=600&fit=crop',
+      thumbnailUrl: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=400&h=300&fit=crop',
+      fileType: 'image',
+      fileSize: 2621440,
+      dimensions: '1920x1080',
+      categoryId: categories[4]._id,
+      uploadedBy: uploader._id,
+      tags: ['research', 'computer-vision', 'robotics', 'poster'],
+      isFeatured: false,
+      viewCount: 34
+    },
+
+    // Lab Equipment
+    {
+      title: '3D Printer Setup',
+      description: 'Complete setup and calibration guide for lab 3D printer',
+      fileUrl: 'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=800&h=600&fit=crop',
+      thumbnailUrl: 'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=400&h=300&fit=crop',
+      fileType: 'image',
+      fileSize: 1966080,
+      dimensions: '1920x1080',
+      categoryId: categories[5]._id,
+      uploadedBy: uploader._id,
+      tags: ['3D-printer', 'equipment', 'setup', 'calibration'],
+      isFeatured: false,
+      viewCount: 56
+    },
+    {
+      title: 'Robot Testing Arena',
+      description: 'Overview of the robot testing arena and obstacle course',
+      fileUrl: 'https://images.unsplash.com/photo-1485827404703-89b55fcc595e?w=800&h=600&fit=crop',
+      thumbnailUrl: 'https://images.unsplash.com/photo-1485827404703-89b55fcc595e?w=400&h=300&fit=crop',
+      fileType: 'image',
+      fileSize: 1835008,
+      dimensions: '1920x1080',
+      categoryId: categories[5]._id,
+      uploadedBy: uploader._id,
+      tags: ['arena', 'testing', 'obstacles', 'course'],
+      isFeatured: true,
+      viewCount: 98
+    },
+
+    // Event Coverage
+    {
+      title: 'Tech Expo 2024',
+      description: 'Highlights from the annual technology expo showcasing student projects',
+      fileUrl: 'https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_1mb.mp4',
+      thumbnailUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=400&h=300&fit=crop',
+      fileType: 'video',
+      fileSize: 36700160,
+      dimensions: '1280x720',
+      duration: 300,
+      categoryId: categories[6]._id,
+      uploadedBy: uploader._id,
+      tags: ['expo', 'tech', 'showcase', '2024'],
+      isFeatured: true,
+      viewCount: 445
+    },
+    {
+      title: 'Community Outreach Event',
+      description: 'Photos from robotics demonstration at local school',
+      fileUrl: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=800&h=600&fit=crop',
+      thumbnailUrl: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?w=400&h=300&fit=crop',
+      fileType: 'image',
+      fileSize: 2097152,
+      dimensions: '1920x1080',
+      categoryId: categories[6]._id,
+      uploadedBy: uploader._id,
+      tags: ['outreach', 'community', 'school', 'demonstration'],
+      isFeatured: false,
+      viewCount: 78
+    },
+
+    // Tutorial Videos
+    {
+      title: 'ROS Basics Tutorial',
+      description: 'Introduction to Robot Operating System (ROS) fundamentals',
+      fileUrl: 'https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_2mb.mp4',
+      thumbnailUrl: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=400&h=300&fit=crop',
+      fileType: 'video',
+      fileSize: 52428800,
+      dimensions: '1280x720',
+      duration: 900,
+      categoryId: categories[7]._id,
+      uploadedBy: uploader._id,
+      tags: ['tutorial', 'ROS', 'basics', 'fundamentals'],
+      isFeatured: true,
+      viewCount: 234
+    },
+    {
+      title: 'PCB Design Guide',
+      description: 'Complete guide to designing printed circuit boards for robotics projects',
+      fileUrl: 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf',
+      thumbnailUrl: 'https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?w=400&h=300&fit=crop',
+      fileType: 'document',
+      fileSize: 4194304,
+      categoryId: categories[7]._id,
+      uploadedBy: uploader._id,
+      tags: ['PCB', 'design', 'guide', 'electronics'],
+      isFeatured: false,
+      viewCount: 89
+    }
+  ]);
+
+  console.log(`Created ${mediaFiles.length} media files`);
+
+  // Create media collections
+  const collections = await MediaCollection.create([
+    {
+      name: 'Competition Highlights 2024',
+      description: 'Best moments and highlights from the 2024 robotics competition season',
+      coverMediaId: mediaFiles[3]._id, // Final Round Competition video
+      isPublic: true,
+      createdBy: uploader._id,
+      mediaItems: [
+        { mediaId: mediaFiles[3]._id, position: 1 },
+        { mediaId: mediaFiles[4]._id, position: 2 },
+        { mediaId: mediaFiles[0]._id, position: 3 }, // Team Photo
+        { mediaId: mediaFiles[2]._id, position: 4 }  // Celebration
+      ]
+    },
+    {
+      name: 'Educational Resources',
+      description: 'Comprehensive collection of tutorials, workshops, and learning materials',
+      coverMediaId: mediaFiles[8]._id, // Arduino Tutorial
+      isPublic: true,
+      createdBy: uploader._id,
+      mediaItems: [
+        { mediaId: mediaFiles[8]._id, position: 1 },
+        { mediaId: mediaFiles[7]._id, position: 2 }, // Workshop slides
+        { mediaId: mediaFiles[18]._id, position: 3 }, // ROS Tutorial
+        { mediaId: mediaFiles[19]._id, position: 4 }  // PCB Guide
+      ]
+    },
+    {
+      name: 'Research & Development',
+      description: 'Research presentations, technical documentation, and project schematics',
+      coverMediaId: mediaFiles[10]._id, // SLAM Research
+      isPublic: true,
+      createdBy: uploader._id,
+      mediaItems: [
+        { mediaId: mediaFiles[10]._id, position: 1 },
+        { mediaId: mediaFiles[11]._id, position: 2 }, // Computer Vision
+        { mediaId: mediaFiles[5]._id, position: 3 },  // Rover Schematic
+        { mediaId: mediaFiles[6]._id, position: 4 }   // Robotic Arm CAD
+      ]
+    },
+    {
+      name: 'Lab Infrastructure',
+      description: 'Photos and documentation of lab equipment, facilities, and setup',
+      coverMediaId: mediaFiles[15]._id, // Robot Testing Arena
+      isPublic: true,
+      createdBy: uploader._id,
+      mediaItems: [
+        { mediaId: mediaFiles[15]._id, position: 1 },
+        { mediaId: mediaFiles[14]._id, position: 2 }, // 3D Printer
+        { mediaId: mediaFiles[1]._id, position: 3 },  // Lab Working Session
+        { mediaId: mediaFiles[0]._id, position: 4 }   // Team Photo
+      ]
+    },
+    {
+      name: 'Community Events',
+      description: 'Coverage of outreach events, expos, and community engagement activities',
+      coverMediaId: mediaFiles[16]._id, // Tech Expo
+      isPublic: true,
+      createdBy: uploader._id,
+      mediaItems: [
+        { mediaId: mediaFiles[16]._id, position: 1 },
+        { mediaId: mediaFiles[17]._id, position: 2 }, // Outreach Event
+        { mediaId: mediaFiles[0]._id, position: 3 },  // Team Photo
+        { mediaId: mediaFiles[2]._id, position: 4 }   // Celebration
+      ]
+    }
+  ]);
+
+  console.log(`Created ${collections.length} media collections`);
+  console.log('✅ Comprehensive media seeding completed successfully!');
 }
 
 async function seedContactsAndMessages({ admin, users }) {
