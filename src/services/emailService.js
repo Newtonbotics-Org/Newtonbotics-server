@@ -77,16 +77,18 @@ async function sendContactAcknowledgement({ name, email }) {
   return sendEmail({ to: email, subject, html, text });
 }
 
-async function sendContactNotificationToAdmin({ subject: sub, name, email, message }) {
+async function sendContactNotificationToAdmin({ subject: sub, name, email, message, phone, category }) {
   const adminEmail = process.env.ADMIN_NOTIFY_EMAIL || process.env.SMTP_USER || from;
   const subject = `[Contact] ${sub} from ${name}`;
   const html = buildHtml('New contact submission', `
     <p><strong>From:</strong> ${name} (${email})</p>
     <p><strong>Subject:</strong> ${sub}</p>
+    <p><strong>Category:</strong> ${category || 'General'}</p>
+    <p><strong>Phone:</strong> ${phone || 'Not provided'}</p>
     <p><strong>Message:</strong></p>
     <p>${message}</p>
   `);
-  const text = `From: ${name} <${email}>, Subject: ${sub}, Message: ${message}`;
+  const text = `From: ${name} <${email}>, Subject: ${sub}, Category: ${category || 'General'}, Phone: ${phone || 'Not provided'}, Message: ${message}`;
   return sendEmail({ to: adminEmail, subject, html, text });
 }
 

@@ -7,6 +7,7 @@ const contactSubmissionSchema = new mongoose.Schema(
     subject: { type: String, required: true, maxlength: 255, index: true },
     message: { type: String, required: true, maxlength: 5000 },
     phone: { type: String, maxlength: 20 },
+    category: { type: String, maxlength: 100, index: true, default: 'General' },
     department: { type: String, maxlength: 100, index: true },
     status: { type: String, enum: ['new', 'in_progress', 'resolved', 'closed'], default: 'new', index: true },
     assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
