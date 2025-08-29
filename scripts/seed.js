@@ -1153,8 +1153,8 @@ async function seedMedia({ uploader }) {
       mediaItems: [
         { mediaId: mediaFiles[8]._id, position: 1 },
         { mediaId: mediaFiles[7]._id, position: 2 }, // Workshop slides
-        { mediaId: mediaFiles[18]._id, position: 3 }, // ROS Tutorial
-        { mediaId: mediaFiles[19]._id, position: 4 }  // PCB Guide
+        { mediaId: mediaFiles[16]._id, position: 3 }, // ROS Tutorial
+        { mediaId: mediaFiles[17]._id, position: 4 }  // PCB Guide
       ]
     },
     {
