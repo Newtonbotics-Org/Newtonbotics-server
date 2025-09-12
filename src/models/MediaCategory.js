@@ -2,9 +2,9 @@ const mongoose = require('mongoose');
 
 const mediaCategorySchema = new mongoose.Schema(
   {
-    name: { type: String, required: true, maxlength: 100, trim: true, index: true },
+    name: { type: String, required: true, maxlength: 100, trim: true },
     description: { type: String, maxlength: 1000, trim: true },
-    parentCategoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'MediaCategory', index: true },
+    parentCategoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'MediaCategory' },
   },
   { timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' } }
 );

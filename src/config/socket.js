@@ -7,7 +7,12 @@ let io = null;
 const setupSocketIO = (server) => {
   io = new Server(server, {
     cors: {
-      origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+      origin: [
+        'http://localhost:3000',
+        'http://localhost:3003',
+        'http://localhost:3005',
+        process.env.CORS_ORIGIN
+      ].filter(Boolean), // Remove any undefined values
       credentials: true,
       methods: ['GET', 'POST'],
     },

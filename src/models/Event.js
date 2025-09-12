@@ -8,25 +8,25 @@ const registrationSchema = new mongoose.Schema({
 
 const eventSchema = new mongoose.Schema(
   {
-    title: { type: String, required: true, maxlength: 255, trim: true, index: true },
+    title: { type: String, required: true, maxlength: 255, trim: true },
     description: { type: String, required: true, maxlength: 5000, trim: true },
-    category: { type: String, maxlength: 100, trim: true, index: true },
+    category: { type: String, maxlength: 100, trim: true },
     type: {
       type: String,
       required: true,
       enum: ['workshop', 'seminar', 'exhibition', 'training', 'networking', 'competition', 'technical', 'educational', 'showcase'],
-      index: true,
+
     },
-    startDate: { type: Date, required: true, index: true },
-    endDate: { type: Date, required: true, index: true },
+    startDate: { type: Date, required: true },
+    endDate: { type: Date, required: true },
     location: { type: String, maxlength: 255, trim: true },
     maxCapacity: { type: Number, min: 1 },
     currentRegistrations: { type: Number, default: 0, min: 0 },
-    registrationDeadline: { type: Date, index: true },
-    isFeatured: { type: Boolean, default: false, index: true },
+    registrationDeadline: { type: Date },
+    isFeatured: { type: Boolean, default: false },
     imageUrl: { type: String, maxlength: 500, trim: true },
-    organizerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
-    status: { type: String, enum: ['upcoming', 'ongoing', 'completed', 'cancelled'], default: 'upcoming', index: true },
+    organizerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    status: { type: String, enum: ['upcoming', 'ongoing', 'completed', 'cancelled'], default: 'upcoming' },
     registrations: [registrationSchema],
   },
   { timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' } }

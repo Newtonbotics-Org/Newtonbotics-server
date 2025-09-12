@@ -15,8 +15,7 @@ const userSchema = new mongoose.Schema({
     match: [
       /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
       'Please provide a valid email address'
-    ],
-    index: true
+    ]
   },
   passwordHash: {
     type: String,
@@ -44,8 +43,7 @@ const userSchema = new mongoose.Schema({
       values: ['student', 'team_member', 'mentor', 'researcher', 'community', 'admin'],
       message: 'Role must be one of: student, team_member, mentor, researcher, community, admin'
     },
-    default: 'student',
-    index: true
+    default: 'student'
   },
   // Subroles and specializations for additional responsibilities
   subroles: [{
@@ -102,8 +100,7 @@ const userSchema = new mongoose.Schema({
   specialization: {
     type: String,
     trim: true,
-    maxlength: [200, 'Specialization cannot exceed 200 characters'],
-    index: true
+    maxlength: [200, 'Specialization cannot exceed 200 characters']
   },
   // Years of experience in the field
   experienceYears: {
@@ -145,8 +142,7 @@ const userSchema = new mongoose.Schema({
   department: {
     type: String,
     trim: true,
-    maxlength: [100, 'Department cannot exceed 100 characters'],
-    index: true
+    maxlength: [100, 'Department cannot exceed 100 characters']
   },
   yearOfStudy: {
     type: Number,
@@ -184,13 +180,11 @@ const userSchema = new mongoose.Schema({
   }],
   isActive: {
     type: Boolean,
-    default: true,
-    index: true
+    default: true
   },
   emailVerified: {
     type: Boolean,
-    default: false,
-    index: true
+    default: false
   },
   lastLogin: {
     type: Date
@@ -265,7 +259,6 @@ userSchema.virtual('profileCompletion').get(function() {
 });
 
 // Indexes for performance
-userSchema.index({ email: 1 });
 userSchema.index({ role: 1 });
 userSchema.index({ department: 1 });
 userSchema.index({ isActive: 1 });

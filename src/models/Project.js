@@ -6,8 +6,7 @@ const projectSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Project title is required'],
     trim: true,
-    maxlength: [255, 'Project title cannot exceed 255 characters'],
-    index: true
+    maxlength: [255, 'Project title cannot exceed 255 characters']
   },
   description: {
     type: String,
@@ -18,8 +17,7 @@ const projectSchema = new mongoose.Schema({
   category: {
     type: String,
     trim: true,
-    maxlength: [100, 'Category cannot exceed 100 characters'],
-    index: true
+    maxlength: [100, 'Category cannot exceed 100 characters']
   },
   status: {
     type: String,
@@ -28,12 +26,10 @@ const projectSchema = new mongoose.Schema({
       values: ['upcoming', 'ongoing', 'completed', 'on_hold'],
       message: 'Status must be one of: upcoming, ongoing, completed, on_hold'
     },
-    default: 'upcoming',
-    index: true
+    default: 'upcoming'
   },
   startDate: {
     type: Date,
-    index: true,
     validate: {
       validator: function(value) {
         if (this.status === 'completed' && !value) {
@@ -46,7 +42,6 @@ const projectSchema = new mongoose.Schema({
   },
   endDate: {
     type: Date,
-    index: true,
     validate: {
       validator: function(value) {
         if (value && this.startDate && value <= this.startDate) {
@@ -68,7 +63,6 @@ const projectSchema = new mongoose.Schema({
   mentorId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    index: true,
     validate: {
       validator: async function(value) {
         if (!value) return true;
@@ -83,7 +77,6 @@ const projectSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: [true, 'Team leader is required'],
-    index: true,
     validate: {
       validator: async function(value) {
         if (!value) return false;
@@ -287,13 +280,11 @@ const projectSchema = new mongoose.Schema({
   },
   isPublic: {
     type: Boolean,
-    default: true,
-    index: true
+    default: true
   },
   isFeatured: {
     type: Boolean,
-    default: false,
-    index: true
+    default: false
   },
   viewCount: {
     type: Number,

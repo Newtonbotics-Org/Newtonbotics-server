@@ -283,14 +283,16 @@ const requireWorkshopInstructor = asyncHandler(async (req, res, next) => {
 
 // Rate limiting for authentication endpoints
 const authRateLimit = require('express-rate-limit')({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // limit each IP to 5 requests per windowMs
+  windowMs: parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
+  max: parseInt(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS) || 5, // limit each IP to 5 requests per windowMs
   message: {
     error: 'Too many authentication attempts, please try again later.',
-    retryAfter: 15,
+    retryAfter: parseInt(process.env.AUTH_RATE_LIMIT_RETRY_AFTER) || 15,
   },
   standardHeaders: true,
   legacyHeaders: false,
+  // Skip rate limiting if disabled via environment variable
+  skip: (req) => process.env.DISABLE_AUTH_RATE_LIMIT === 'true',
 });
 
 module.exports = {

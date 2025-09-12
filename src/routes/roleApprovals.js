@@ -1,10 +1,13 @@
 const express = require('express');
 const { body, param, validationResult } = require('express-validator');
 const { asyncHandler, validationErrorHandler, notFoundErrorHandler } = require('../middleware/errorHandler');
-const { requireAdmin } = require('../middleware/auth');
+const { verifyToken, requireAdmin } = require('../middleware/auth');
 const RoleApproval = require('../models/RoleApproval');
 
 const router = express.Router();
+
+// Apply authentication middleware to all routes
+router.use(verifyToken);
 
 const upsertValidation = [
   body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),

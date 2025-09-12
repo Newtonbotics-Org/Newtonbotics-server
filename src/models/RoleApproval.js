@@ -8,7 +8,6 @@ const roleApprovalSchema = new mongoose.Schema({
     trim: true,
     maxlength: 255,
     match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'Please provide a valid email address'],
-    index: true,
   },
   allowedRoles: [{
     type: String,

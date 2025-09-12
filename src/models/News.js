@@ -2,48 +2,42 @@ const mongoose = require('mongoose');
 
 const newsSchema = new mongoose.Schema(
   {
-    title: { type: String, required: true, maxlength: 255, trim: true, index: true },
+    title: { type: String, required: true, maxlength: 255, trim: true },
     content: { type: String, required: true, maxlength: 10000 },
     excerpt: { type: String, maxlength: 500 },
-    categoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'NewsCategory', index: true },
-    authorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    categoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'NewsCategory' },
+    authorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     featuredImageUrl: { type: String, maxlength: 500 },
-    tags: [{ type: String, maxlength: 100, index: true }],
-    isFeatured: { type: Boolean, default: false, index: true },
-    isPublished: { type: Boolean, default: false, index: true },
-    publishedAt: { type: Date, index: true },
+    tags: [{ type: String, maxlength: 100 }],
+    isFeatured: { type: Boolean, default: false },
+    isPublished: { type: Boolean, default: false },
+    publishedAt: { type: Date },
     viewCount: { type: Number, default: 0, min: 0 },
     // Optional display/feature options used by the frontend navigation and surfaces
     featureOptions: {
-      showInNav: { type: Boolean, default: false, index: true },
+      showInNav: { type: Boolean, default: false },
       navLabel: { type: String, maxlength: 50, trim: true },
       navOrder: { type: Number, default: 0, min: 0 },
     },
     // Optional application settings to allow users to apply directly from a news item
     application: {
-      isEnabled: { type: Boolean, default: false, index: true },
+      isEnabled: { type: Boolean, default: false },
       type: {
         type: String,
         enum: ['workshop', 'event', 'competition', 'other'],
         default: 'other',
-        index: true,
       },
       requireLogin: { type: Boolean, default: false },
-      deadline: { type: Date },
+      formApplyStartDate: { type: Date }, // When applications can start being submitted
+      formApplyLastDate: { type: Date }, // When applications close (deadline)
       maxApplicants: { type: Number, min: 1 },
-      formFields: [
-        {
-          name: { type: String, required: true, trim: true, maxlength: 100 },
-          label: { type: String, required: true, trim: true, maxlength: 255 },
-          type: {
-            type: String,
-            enum: ['text', 'email', 'phone', 'textarea', 'select', 'radio', 'checkbox', 'url', 'number'],
-            default: 'text',
-          },
-          required: { type: Boolean, default: false },
-          options: [{ type: String, maxlength: 100 }],
-        },
-      ],
+      formLink: { type: String, maxlength: 500 }, // External form link for applications
+      // Auto-calculated status based on current date
+      status: {
+        type: String,
+        enum: ['active', 'expired', 'not_started'],
+        default: 'not_started'
+      },
       // Optional target linkage for internal entities like Workshop or Event
       targetType: { type: String, enum: ['Workshop', 'Event', 'Competition', 'Other'], default: 'Other' },
       targetId: { type: mongoose.Schema.Types.ObjectId },
@@ -51,6 +45,56 @@ const newsSchema = new mongoose.Schema(
   },
   { timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' } }
 );
+
+// Pre-save middleware to automatically calculate application status
+newsSchema.pre('save', function(next) {
+  if (this.application && this.application.isEnabled) {
+    const now = new Date();
+    const startDate = this.application.formApplyStartDate;
+    const lastDate = this.application.formApplyLastDate;
+    
+    if (!startDate || !lastDate) {
+      this.application.status = 'not_started';
+    } else if (now < startDate) {
+      this.application.status = 'not_started';
+    } else if (now > lastDate) {
+      this.application.status = 'expired';
+    } else {
+      this.application.status = 'active';
+    }
+  }
+  next();
+});
+
+// Pre-find middleware to update status for existing documents
+newsSchema.pre('find', function() {
+  this.updateMany(
+    { 
+      'application.isEnabled': true,
+      'application.formApplyStartDate': { $exists: true },
+      'application.formApplyLastDate': { $exists: true }
+    },
+    [
+      {
+        $set: {
+          'application.status': {
+            $cond: {
+              if: { $lt: ['$application.formApplyStartDate', new Date()] },
+              then: {
+                $cond: {
+                  if: { $gt: ['$application.formApplyLastDate', new Date()] },
+                  then: 'active',
+                  else: 'expired'
+                }
+              },
+              else: 'not_started'
+            }
+          }
+        }
+      }
+    ]
+  );
+});
 
 module.exports = mongoose.model('News', newsSchema);
 

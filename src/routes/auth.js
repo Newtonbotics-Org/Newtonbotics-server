@@ -240,7 +240,7 @@ router.post('/register', registerValidation, asyncHandler(async (req, res) => {
 // @route   POST /api/auth/login
 // @desc    Authenticate user & get token
 // @access  Public
-router.post('/login', authRateLimit, loginValidation, asyncHandler(async (req, res) => {
+router.post('/login', loginValidation, asyncHandler(async (req, res) => {
   // Check for validation errors
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
