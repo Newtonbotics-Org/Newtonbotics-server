@@ -16,6 +16,7 @@ const { asyncHandler, validationErrorHandler, notFoundErrorHandler } = require('
 // - GET /api/inventory/categories - List equipment categories
 // - POST /api/inventory/equipment/:id/checkout - Checkout equipment
 // - PUT /api/inventory/equipment/:id/return - Return equipment
+// - POST /api/inventory/equipment/:id/urgent-checkout - Urgent checkout (records even if stock insufficient)
 
 // Equipment list with filters
 router.get(
@@ -115,6 +116,59 @@ router.post('/equipment/:id/checkout', verifyToken, requireTeamMember, async (re
     res.status(500).json({ success: false, error: 'Failed to checkout' });
   }
 });
+
+// Urgent checkout: records usage even when stock is insufficient
+router.post(
+  '/equipment/:id/urgent-checkout',
+  verifyToken,
+  requireTeamMember,
+  [
+    param('id').isString(),
+    body('quantity').optional().isInt({ min: 1 }).toInt(),
+    body('expectedReturnDate').optional().isISO8601().toDate(),
+    body('notes').optional().isString().isLength({ max: 1000 }),
+  ],
+  asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) throw validationErrorHandler(errors);
+
+    const equipment = await Equipment.findById(req.params.id);
+    if (!equipment) throw notFoundErrorHandler('Equipment');
+
+    const requested = Math.max(1, Number(req.body.quantity || 1));
+    const availableNow = Math.max(0, Number(equipment.currentQuantity || 0));
+    const fulfilled = Math.min(requested, availableNow);
+    const overdrawn = Math.max(0, requested - fulfilled);
+    const expectedReturnDate = req.body.expectedReturnDate || new Date(Date.now() + 7*24*60*60*1000);
+
+    // Reduce only what is available; never below zero
+    equipment.currentQuantity = availableNow - fulfilled;
+    equipment.checkouts.push({
+      userId: req.user.id,
+      quantity: requested, // store the requested as the primary quantity
+      expectedReturnDate,
+      checkoutNotes: req.body.notes,
+      isUrgent: true,
+      requestedQuantity: requested,
+      fulfilledQuantity: fulfilled,
+      overdrawnQuantity: overdrawn,
+      userNameSnapshot: [req.user.firstName, req.user.lastName].filter(Boolean).join(' ') || req.user.email,
+    });
+
+    await equipment.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Urgent checkout recorded',
+      data: {
+        currentQuantity: equipment.currentQuantity,
+        requestedQuantity: requested,
+        fulfilledQuantity: fulfilled,
+        overdrawnQuantity: overdrawn,
+      },
+    });
+  })
+);
 
 router.put(
   '/equipment/:id/return',

@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('path');
 const router = express.Router();
 const Project = require('../models/Project');
 const News = require('../models/News');
@@ -352,6 +353,18 @@ router.get('/team-directory', asyncHandler(async (req, res) => {
 router.get('/team-members', getPeopleByRole('team_member'));
 router.get('/mentors', getPeopleByRole('mentor'));
 router.get('/researchers', getPeopleByRole('researcher'));
+
+// Download: Equipment Guide PDF
+router.get('/equipment-guide.pdf', (req, res) => {
+  const pdfPath = path.join(__dirname, '../../docs/EQUIPMENT_GUIDE.pdf');
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', 'attachment; filename="EQUIPMENT_GUIDE.pdf"');
+  res.sendFile(pdfPath, (err) => {
+    if (err) {
+      res.status(err.statusCode || 500).json({ success: false, error: 'File not found or unavailable' });
+    }
+  });
+});
 
 module.exports = router;
 

@@ -9,6 +9,12 @@ const checkoutSchema = new mongoose.Schema({
   checkoutNotes: { type: String, maxlength: 1000 },
   returnNotes: { type: String, maxlength: 1000 },
   status: { type: String, enum: ['checked_out', 'returned', 'overdue', 'lost'], default: 'checked_out' },
+  // Urgent checkout fields
+  isUrgent: { type: Boolean, default: false },
+  requestedQuantity: { type: Number, min: 1 },
+  fulfilledQuantity: { type: Number, min: 0 },
+  overdrawnQuantity: { type: Number, min: 0, default: 0 },
+  userNameSnapshot: { type: String, maxlength: 255, trim: true },
 });
 
 const equipmentSchema = new mongoose.Schema(

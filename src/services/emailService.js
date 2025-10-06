@@ -57,6 +57,17 @@ async function sendPasswordResetEmail({ email, token }) {
   return sendEmail({ to: email, subject, html, text });
 }
 
+async function sendPasswordResetOtpEmail({ email, otp }) {
+  const subject = 'Your NewtonBotics password reset code';
+  const html = buildHtml('Password reset code', `
+    <p>Use the following one-time code to reset your password:</p>
+    <p style="font-size:24px; letter-spacing:4px; font-weight:700; color:#111827;">${otp}</p>
+    <p>This code expires in 10 minutes. If you didn't request this, you can safely ignore this email.</p>
+  `);
+  const text = `Your password reset code is: ${otp} (expires in 10 minutes)`;
+  return sendEmail({ to: email, subject, html, text });
+}
+
 async function sendRoleAssignedEmail({ email, fullName, role }) {
   const subject = 'Your NewtonBotics role has been updated';
   const html = buildHtml('Role updated', `
@@ -95,6 +106,7 @@ async function sendContactNotificationToAdmin({ subject: sub, name, email, messa
 module.exports = {
   sendEmail,
   sendPasswordResetEmail,
+  sendPasswordResetOtpEmail,
   sendRoleAssignedEmail,
   sendContactAcknowledgement,
   sendContactNotificationToAdmin,

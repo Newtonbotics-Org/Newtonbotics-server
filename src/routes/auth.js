@@ -8,7 +8,7 @@ const User = require('../models/User');
 const { asyncHandler, validationErrorHandler, conflictErrorHandler, authenticationErrorHandler, authorizationErrorHandler } = require('../middleware/errorHandler');
 const { authRateLimit, verifyToken } = require('../middleware/auth');
 const logger = require('../utils/logger');
-const { sendPasswordResetEmail } = require('../services/emailService');
+const { sendPasswordResetEmail, sendPasswordResetOtpEmail } = require('../services/emailService');
 const RoleApproval = require('../models/RoleApproval');
 
 const router = express.Router();
@@ -99,6 +99,40 @@ const resetPasswordValidation = [
     .notEmpty()
     .withMessage('Reset token is required'),
   
+  body('newPassword')
+    .isLength({ min: 8 })
+    .withMessage('Password must be at least 8 characters long')
+    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/)
+    .withMessage('Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character'),
+];
+
+// OTP-based reset validations
+const sendOtpValidation = [
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email address'),
+];
+
+const verifyOtpValidation = [
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Please provide a valid email address'),
+  body('otp')
+    .isLength({ min: 6, max: 6 })
+    .withMessage('OTP must be 6 digits')
+    .matches(/^\d{6}$/)
+    .withMessage('OTP must be numeric'),
+  body('otpToken')
+    .optional()
+    .isString(),
+];
+
+const resetWithTokenValidation = [
+  body('token')
+    .notEmpty()
+    .withMessage('Reset token is required'),
   body('newPassword')
     .isLength({ min: 8 })
     .withMessage('Password must be at least 8 characters long')
@@ -588,6 +622,161 @@ router.post('/reset-password', resetPasswordValidation, asyncHandler(async (req,
       success: true,
       message: 'Password reset successfully'
     });
+
+  } catch (error) {
+    if (error.name === 'JsonWebTokenError') {
+      throw new Error('Invalid reset token');
+    }
+    if (error.name === 'TokenExpiredError') {
+      throw new Error('Reset token expired');
+    }
+    throw error;
+  }
+}));
+
+// @route   POST /api/auth/forgot-password-otp
+// @desc    Send 6-digit OTP for password reset
+// @access  Public
+router.post('/forgot-password-otp', sendOtpValidation, asyncHandler(async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    throw validationErrorHandler(errors);
+  }
+
+  const { email } = req.body;
+
+  const user = await User.findOne({ email });
+  if (!user) {
+    return res.json({ success: false, message: 'No account found with this email address' });
+  }
+
+  // Simple rate limit per email (5 per hour) when Redis is available
+  if (isRedisEnabled()) {
+    const redisClient = getRedisClient();
+    const key = `otp_req:${email}`;
+    const count = await redisClient.incr(key);
+    if (count === 1) {
+      await redisClient.expire(key, 3600);
+    }
+    if (count > 5) {
+      return res.status(429).json({ success: false, message: 'Too many OTP requests. Try again later.' });
+    }
+  }
+
+  // Generate OTP
+  const otp = (Math.floor(100000 + Math.random() * 900000)).toString();
+
+  if (isRedisEnabled()) {
+    const redisClient = getRedisClient();
+    const otpHash = await bcrypt.hash(otp, 10);
+    await redisClient.setEx(`password_reset_otp:${user._id}`, 600, otpHash); // 10 minutes
+    await sendPasswordResetOtpEmail({ email: user.email, otp });
+    logger.logAuth('password_reset_otp_sent', user._id, true, { email: user.email, ip: req.ip });
+    return res.json({ success: true, message: 'OTP has been sent to your email address' });
+  } else {
+    // No Redis: embed hashed OTP in a short-lived JWT returned to client
+    const otpHash = await bcrypt.hash(otp, 10);
+    const otpToken = jwt.sign(
+      { sub: user._id, type: 'password_reset_otp_challenge', otpHash },
+      process.env.JWT_SECRET,
+      { expiresIn: '10m' }
+    );
+    await sendPasswordResetOtpEmail({ email: user.email, otp });
+    logger.logAuth('password_reset_otp_sent', user._id, true, { email: user.email, ip: req.ip });
+    return res.json({ success: true, message: 'OTP has been sent to your email address', data: { otpToken } });
+  }
+}));
+
+// @route   POST /api/auth/verify-reset-otp
+// @desc    Verify OTP and issue short-lived reset token
+// @access  Public
+router.post('/verify-reset-otp', verifyOtpValidation, asyncHandler(async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    throw validationErrorHandler(errors);
+  }
+
+  const { email, otp } = req.body;
+  const user = await User.findOne({ email });
+  if (!user) {
+    throw new Error('Invalid OTP or email');
+  }
+
+  if (isRedisEnabled()) {
+    const redisClient = getRedisClient();
+    const storedHash = await redisClient.get(`password_reset_otp:${user._id}`);
+    if (!storedHash) {
+      throw new Error('OTP expired or not found');
+    }
+    const ok = await bcrypt.compare(otp, storedHash);
+    if (!ok) {
+      throw new Error('Invalid OTP');
+    }
+    // consume OTP
+    await redisClient.del(`password_reset_otp:${user._id}`);
+  } else {
+    const { otpToken } = req.body;
+    if (!otpToken) {
+      throw new Error('OTP token is required');
+    }
+    try {
+      const decoded = jwt.verify(otpToken, process.env.JWT_SECRET);
+      if (decoded.type !== 'password_reset_otp_challenge' || String(decoded.sub) !== String(user._id)) {
+        throw new Error('Invalid OTP token');
+      }
+      const ok = await bcrypt.compare(otp, decoded.otpHash);
+      if (!ok) {
+        throw new Error('Invalid OTP');
+      }
+    } catch (e) {
+      if (e.name === 'TokenExpiredError') {
+        throw new Error('OTP token expired');
+      }
+      throw e;
+    }
+  }
+
+  // Issue a short-lived reset token (15 minutes)
+  const token = jwt.sign({ sub: user._id, type: 'password_reset_otp' }, process.env.JWT_SECRET, { expiresIn: '15m' });
+
+  logger.logAuth('password_reset_otp_verified', user._id, true, { email: user.email, ip: req.ip });
+
+  res.json({ success: true, data: { token }, message: 'OTP verified' });
+}));
+
+// @route   POST /api/auth/reset-password-otp
+// @desc    Reset password using short-lived token from OTP verification
+// @access  Public
+router.post('/reset-password-otp', resetWithTokenValidation, asyncHandler(async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    throw validationErrorHandler(errors);
+  }
+
+  const { token, newPassword } = req.body;
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.type !== 'password_reset_otp') {
+      throw new Error('Invalid token type');
+    }
+
+    const user = await User.findById(decoded.sub);
+    if (!user || !user.isActive) {
+      throw new Error('User not found or inactive');
+    }
+
+    user.passwordHash = newPassword;
+    await user.save();
+
+    if (isRedisEnabled()) {
+      const redisClient = getRedisClient();
+      await redisClient.del(`refresh_token:${user._id}`);
+    }
+
+    logger.logAuth('password_reset_via_otp', user._id, true, { email: user.email, ip: req.ip });
+
+    res.json({ success: true, message: 'Password reset successfully' });
 
   } catch (error) {
     if (error.name === 'JsonWebTokenError') {

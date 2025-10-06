@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Equipment Frontend Implementation Guide</title>
+    <style>
+      body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; line-height: 1.55; color: #0f172a; margin: 40px; }
+      h1, h2, h3 { color: #0b1324; }
+      code, pre { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 2px 6px; }
+      pre { padding: 12px; overflow-x: auto; }
+      .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      .muted { color: #475569; }
+      table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+      th, td { border: 1px solid #e2e8f0; padding: 8px; text-align: left; font-size: 14px; }
+      th { background: #f1f5f9; }
+      .section { margin: 24px 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Equipment Frontend Implementation Guide</h1>
+    <p class="muted">Base API path: <code>/api/inventory</code></p>
+
+    <div class="section">
+      <h2>Auth and Roles</h2>
+      <ul>
+        <li>Public/optional: equipment list, equipment by id, categories list</li>
+        <li>Team member or higher: create, update, checkout, return</li>
+        <li>Mentor or higher: delete</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h2>Data Models</h2>
+      <h3>Equipment</h3>
+      <ul>
+        <li><strong>name</strong> string [2–255], required</li>
+        <li><strong>description</strong> string [≤2000]</li>
+        <li><strong>categoryId</strong> ObjectId (ref <code>EquipmentCategory</code>), required</li>
+        <li><strong>modelNumber</strong> string [≤100]</li>
+        <li><strong>serialNumber</strong> string [≤100], unique, sparse</li>
+        <li><strong>manufacturer</strong> string [≤100]</li>
+        <li><strong>purchaseDate</strong> Date</li>
+        <li><strong>purchasePrice</strong> number (≥0)</li>
+        <li><strong>currentQuantity</strong> int (≥0), default 0</li>
+        <li><strong>minQuantity</strong> int (≥0), default 0</li>
+        <li><strong>maxQuantity</strong> int (≥0)</li>
+        <li><strong>location</strong> string [≤255]</li>
+        <li><strong>status</strong> enum: <code>available | low_stock | out_of_stock | maintenance | retired</code></li>
+        <li><strong>imageUrl</strong> string [≤500]</li>
+        <li><strong>specifications</strong> object</li>
+        <li><strong>maintenanceSchedule</strong> string [≤1000]</li>
+        <li><strong>lastMaintenanceDate</strong> Date</li>
+        <li><strong>nextMaintenanceDate</strong> Date</li>
+        <li><strong>checkouts</strong> array of checkout subdocuments</li>
+        <li><strong>createdAt</strong>, <strong>updatedAt</strong> timestamps</li>
+      </ul>
+
+      <h3>Checkout Subdocument</h3>
+      <ul>
+        <li><strong>userId</strong> ObjectId (User), required</li>
+        <li><strong>quantity</strong> int (≥1), required</li>
+        <li><strong>checkoutDate</strong> Date (default now)</li>
+        <li><strong>expectedReturnDate</strong> Date, required</li>
+        <li><strong>actualReturnDate</strong> Date</li>
+        <li><strong>checkoutNotes</strong> string [≤1000]</li>
+        <li><strong>returnNotes</strong> string [≤1000]</li>
+        <li><strong>status</strong> enum: <code>checked_out | returned | overdue | lost</code></li>
+      </ul>
+
+      <h3>Category</h3>
+      <ul>
+        <li><strong>name</strong> string [2–100], required</li>
+        <li><strong>description</strong> string (optional)</li>
+        <li><strong>parentCategoryId</strong> ObjectId (optional)</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h2>Endpoints</h2>
+
+      <h3>GET <span class="badge">/equipment</span></h3>
+      <p class="muted">Auth: optional</p>
+      <p><strong>Query</strong>: <code>categoryId</code>, <code>status</code>, <code>q</code>, <code>limit</code> (1–100), <code>skip</code> (≥0)</p>
+      <p><strong>Response</strong>: <code>{ success, data: { items, pagination: { total, limit, skip, hasMore } } }</code></p>
+
+      <h3>GET <span class="badge">/equipment/:id</span></h3>
+      <p class="muted">Auth: optional</p>
+      <p><strong>Response</strong>: <code>{ success, data: { item } }</code></p>
+
+      <h3>POST <span class="badge">/equipment</span></h3>
+      <p class="muted">Auth: team_member+</p>
+      <p><strong>Body</strong>: name (2–255), categoryId, currentQuantity?, status?, other fields accepted</p>
+      <p><strong>Response</strong>: <code>201 { success, message, data: { item } }</code></p>
+
+      <h3>PUT <span class="badge">/equipment/:id</span></h3>
+      <p class="muted">Auth: team_member+</p>
+      <p><strong>Body</strong>: any updatable fields, including <code>imageUrl</code></p>
+      <p><strong>Response</strong>: <code>{ success, message, data: { item } }</code></p>
+
+      <h3>DELETE <span class="badge">/equipment/:id</span></h3>
+      <p class="muted">Auth: mentor+</p>
+      <p><strong>Response</strong>: <code>{ success, message }</code></p>
+
+      <h3>POST <span class="badge">/equipment/:id/checkout</span></h3>
+      <p class="muted">Auth: team_member+</p>
+      <p><strong>Body</strong>: quantity (default 1), expectedReturnDate (default now+7d)</p>
+      <p><strong>Response</strong>: <code>201 { success, message, data: { currentQuantity } }</code></p>
+
+      <h3>PUT <span class="badge">/equipment/:id/return</span></h3>
+      <p class="muted">Auth: team_member+</p>
+      <p><strong>Body</strong>: checkoutId? (if omitted, returns last active for user)</p>
+      <p><strong>Response</strong>: <code>{ success, message, data: { currentQuantity } }</code></p>
+
+      <h3>GET <span class="badge">/categories</span></h3>
+      <p class="muted">Auth: optional</p>
+      <p><strong>Response</strong>: <code>{ success, data: { items: Category[] } }</code></p>
+
+      <h3>POST <span class="badge">/categories</span></h3>
+      <p class="muted">Auth: team_member+</p>
+      <p><strong>Body</strong>: name (2–100), description?, parentCategoryId?</p>
+      <p><strong>Response</strong>: <code>201 { success, message, data: { item } }</code></p>
+
+      <h3>PUT <span class="badge">/categories/:id</span></h3>
+      <p class="muted">Auth: team_member+</p>
+      <p><strong>Response</strong>: <code>{ success, message, data: { item } }</code></p>
+
+      <h3>DELETE <span class="badge">/categories/:id</span></h3>
+      <p class="muted">Auth: mentor+</p>
+      <p><strong>Response</strong>: <code>{ success, message }</code></p>
+    </div>
+
+    <div class="section">
+      <h2>UI Guidance</h2>
+      <h3>List Page</h3>
+      <ul>
+        <li>Filters: Category, Status, Search, pagination</li>
+        <li>Columns: Name, Category, Status, Current qty, Location, Updated at, Actions</li>
+        <li>Role-based actions: View, Edit (team_member+), Delete (mentor+)</li>
+      </ul>
+      <h3>Detail Page</h3>
+      <ul>
+        <li>Overview, Inventory, Maintenance, Specifications, Checkout history</li>
+        <li>Actions: Checkout, Return, Edit/Delete by role</li>
+      </ul>
+      <h3>Create/Edit Form</h3>
+      <ul>
+        <li>Required: name, categoryId</li>
+        <li>Client validation mirrors server rules</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h2>Example Requests</h2>
+      <pre><code>GET /api/inventory/equipment?q=printer&amp;status=available&amp;limit=20&amp;skip=0</code></pre>
+      <pre><code>GET /api/inventory/equipment/:id</code></pre>
+      <pre><code>POST /api/inventory/equipment</code></pre>
+      <pre><code>PUT /api/inventory/equipment/:id</code></pre>
+      <pre><code>// Example: Update imageUrl
+PUT /api/inventory/equipment/:id
+Authorization: Bearer &lt;token&gt;
+Content-Type: application/json
+
+{
+  "imageUrl": "https://cdn.example.com/inventory/equipment-123.jpg"
+}</code></pre>
+      <pre><code>DELETE /api/inventory/equipment/:id</code></pre>
+      <pre><code>POST /api/inventory/equipment/:id/checkout</code></pre>
+      <pre><code>PUT /api/inventory/equipment/:id/return</code></pre>
+      <pre><code>GET /api/inventory/categories</code></pre>
+    </div>
+
+    <p class="muted">Generated: <script>document.write(new Date().toISOString());</script></p>
+  </body>
+  </html>
+
+

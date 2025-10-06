@@ -15,6 +15,12 @@ const {
   requireAdmin 
 } = require('../middleware/auth');
 const logger = require('../utils/logger');
+const Project = require('../models/Project');
+const Event = require('../models/Event');
+const Workshop = require('../models/Workshop');
+const InternalMessage = require('../models/InternalMessage');
+const NewsApplication = require('../models/NewsApplication');
+const ProjectRequest = require('../models/ProjectRequest');
 const { sendRoleAssignedEmail } = require('../services/emailService');
 
 const router = express.Router();
@@ -140,6 +146,12 @@ const updateUserValidation = [
     .trim()
     .isLength({ max: 100 })
     .withMessage('Skill cannot exceed 100 characters'),
+  
+  body('profileImageUrl')
+    .optional()
+    .trim()
+    .isURL({ protocols: ['http','https'], require_protocol: true })
+    .withMessage('Profile image must be a valid URL')
 ];
 
 const searchValidation = [
@@ -265,6 +277,19 @@ router.get('/profile', asyncHandler(async (req, res) => {
     }
   });
 }));
+
+// @route   GET /api/users/dashboard
+// @desc    Get current user's dashboard
+// @access  Private
+router.get('/dashboard', asyncHandler(async (req, res) => {
+  const dashboard = await buildUserDashboard(req.user.id);
+  if (!dashboard) {
+    throw notFoundErrorHandler('User');
+  }
+  res.json({ success: true, data: { dashboard } });
+}));
+
+ 
 
 // @route   GET /api/users/:id
 // @desc    Get user by ID
@@ -568,3 +593,167 @@ router.get('/roles', asyncHandler(async (req, res) => {
 }));
 
 module.exports = router;
+
+// Dashboard helpers and routes
+
+// Build a consolidated dashboard for a single userId
+async function buildUserDashboard(userId) {
+  const [
+    user,
+    leadOrMemberProjects,
+    organizedEvents,
+    registeredEvents,
+    instructedWorkshops,
+    registeredWorkshops,
+    inboxMessages,
+    sentMessages,
+    newsApplications,
+    projectRequestsSubmitted
+  ] = await Promise.all([
+    User.findById(userId).select('-passwordHash'),
+    Project.find({ $or: [{ teamLeaderId: userId }, { 'teamMembers.userId': userId }] })
+      .select('title status startDate endDate teamLeaderId teamMembers achievements category progress')
+      .lean(),
+    Event.find({ organizerId: userId })
+      .select('title type startDate endDate status')
+      .lean(),
+    Event.find({ 'registrations.userId': userId })
+      .select('title type startDate endDate status registrations')
+      .lean(),
+    Workshop.find({ instructorId: userId })
+      .select('title startDate endDate status credits')
+      .lean(),
+    Workshop.find({ 'registrations.userId': userId })
+      .select('title startDate endDate status credits registrations')
+      .lean(),
+    InternalMessage.find({ recipientId: userId }).sort({ createdAt: -1 }).limit(50).lean(),
+    InternalMessage.find({ senderId: userId }).sort({ createdAt: -1 }).limit(50).lean(),
+    NewsApplication.find({ 'applicant.userId': userId }).select('type status submittedAt').lean(),
+    ProjectRequest.find({ submittedBy: userId }).select('title status submittedAt').lean(),
+  ]);
+
+  if (!user) return null;
+
+  // Derive counts and highlights
+  const competitionsParticipated = (registeredEvents || []).filter(e => e.type === 'competition');
+  const totalCompetitions = competitionsParticipated.length;
+  const achievements = Array.isArray(user.achievements) ? user.achievements : [];
+
+  // Reduce event/workshop registrations to the entry for this user for status if needed
+  function pickRegistrationStatus(docArray) {
+    return (docArray || []).map(d => {
+      const reg = Array.isArray(d.registrations)
+        ? d.registrations.find(r => String(r.userId) === String(userId))
+        : null;
+      return {
+        id: d._id,
+        title: d.title,
+        type: d.type,
+        startDate: d.startDate,
+        endDate: d.endDate,
+        status: d.status,
+        registrationStatus: reg?.attendanceStatus || 'registered'
+      };
+    });
+  }
+
+  const dashboard = {
+    user: {
+      id: user._id,
+      displayName: user.displayName,
+      role: user.role,
+      department: user.department,
+      subroles: user.subroles || [],
+      profileCompletion: user.profileCompletion,
+      createdAt: user.createdAt,
+    },
+    achievements,
+    projects: {
+      total: leadOrMemberProjects.length,
+      items: leadOrMemberProjects.map(p => ({
+        id: p._id,
+        title: p.title,
+        status: p.status,
+        category: p.category,
+        progress: p.progress,
+        startDate: p.startDate,
+        endDate: p.endDate,
+        teamLeaderId: p.teamLeaderId,
+        teamSize: (p.teamMembers?.length || 0) + 1,
+        achievements: p.achievements || [],
+      }))
+    },
+    events: {
+      organized: organizedEvents,
+      registered: pickRegistrationStatus(registeredEvents)
+    },
+    workshops: {
+      instructed: instructedWorkshops,
+      registered: pickRegistrationStatus(registeredWorkshops)
+    },
+    competitions: {
+      participatedCount: totalCompetitions
+    },
+    communications: {
+      inboxCount: inboxMessages.length,
+      sentCount: sentMessages.length,
+      recentInbox: inboxMessages.slice(0, 10).map(m => ({ id: m._id, subject: m.subject, isRead: m.isRead, createdAt: m.createdAt }))
+    },
+    applications: {
+      newsApplications,
+      projectRequests: projectRequestsSubmitted
+    }
+  };
+
+  return dashboard;
+}
+
+// @route   GET /api/users/dashboard
+// @desc    Get current user's dashboard
+// @access  Private
+router.get('/dashboard', asyncHandler(async (req, res) => {
+  const dashboard = await buildUserDashboard(req.user.id);
+  if (!dashboard) {
+    throw notFoundErrorHandler('User');
+  }
+  res.json({ success: true, data: { dashboard } });
+}));
+
+// @route   GET /api/users/:id/dashboard
+// @desc    Get a specific user's dashboard (self or admin)
+// @access  Private
+router.get('/:id/dashboard', asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  if (id !== req.user.id && req.user.role !== 'admin') {
+    throw authorizationErrorHandler('Access denied. You can only view your own dashboard');
+  }
+  const dashboard = await buildUserDashboard(id);
+  if (!dashboard) {
+    throw notFoundErrorHandler('User');
+  }
+  res.json({ success: true, data: { dashboard } });
+}));
+
+// @route   GET /api/users/dashboards
+// @desc    Get dashboards summary for all users (admin only)
+// @access  Private (Admin)
+router.get('/dashboards/all', requireAdmin, asyncHandler(async (req, res) => {
+  const users = await User.find({ isActive: true }).select('_id firstName lastName role department createdAt');
+  const results = await Promise.all(users.map(async u => {
+    const d = await buildUserDashboard(u._id);
+    return {
+      userId: u._id,
+      name: `${u.firstName} ${u.lastName}`,
+      role: u.role,
+      department: u.department,
+      createdAt: u.createdAt,
+      stats: {
+        projects: d?.projects?.total || 0,
+        achievements: (d?.achievements || []).length,
+        competitionsParticipated: d?.competitions?.participatedCount || 0,
+        inboxMessages: d?.communications?.inboxCount || 0
+      }
+    };
+  }));
+  res.json({ success: true, data: { dashboards: results } });
+}));

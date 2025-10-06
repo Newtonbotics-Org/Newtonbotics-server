@@ -9,14 +9,26 @@ const router = express.Router();
 // Apply authentication middleware to all routes
 router.use(verifyToken);
 
+// Derive enums from schema so router stays in sync
+const ROLE_ENUM = (RoleApproval.schema.path('allowedRoles').caster && RoleApproval.schema.path('allowedRoles').caster.enumValues) || ['student', 'team_member', 'mentor', 'researcher', 'community', 'admin'];
+const SUBROLE_ENUM = (RoleApproval.schema.path('allowedSubroles') && RoleApproval.schema.path('allowedSubroles').caster && RoleApproval.schema.path('allowedSubroles').caster.enumValues) || [];
+
 const upsertValidation = [
   body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
   body('allowedRoles')
     .isArray({ min: 1 })
     .withMessage('allowedRoles must be a non-empty array'),
   body('allowedRoles.*')
-    .isIn(['student', 'team_member', 'mentor', 'researcher', 'community', 'admin'])
+    .isIn(ROLE_ENUM)
     .withMessage('Invalid role value in allowedRoles'),
+  body('allowedSubroles')
+    .optional()
+    .isArray()
+    .withMessage('allowedSubroles must be an array when provided'),
+  body('allowedSubroles.*')
+    .optional()
+    .custom((val) => SUBROLE_ENUM.includes(val))
+    .withMessage('Invalid subrole value in allowedSubroles'),
   body('note')
     .optional()
     .isString()
@@ -52,10 +64,11 @@ router.post('/', requireAdmin, upsertValidation, asyncHandler(async (req, res) =
     throw validationErrorHandler(errors);
   }
 
-  const { email, allowedRoles, note } = req.body;
+  const { email, allowedRoles, allowedSubroles, note } = req.body;
   const update = {
     email: email.toLowerCase(),
     allowedRoles: Array.from(new Set(allowedRoles)),
+    ...(Array.isArray(allowedSubroles) ? { allowedSubroles: Array.from(new Set(allowedSubroles)) } : {}),
     note,
     updatedBy: req.user?.id,
   };
@@ -79,6 +92,20 @@ router.delete('/:email', requireAdmin, asyncHandler(async (req, res) => {
     throw notFoundErrorHandler('RoleApproval');
   }
   res.json({ success: true, message: 'Role approval removed' });
+}));
+
+// @route   GET /api/role-approvals/enums
+// @desc    List allowed roles and subroles for the admin UI
+// @access  Private (Admin)
+router.get('/enums/list', requireAdmin, asyncHandler(async (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      roles: ROLE_ENUM,
+      subroles: SUBROLE_ENUM,
+      baseRolesForSubroles: ['team_member', 'mentor', 'researcher', 'community'],
+    },
+  });
 }));
 
 module.exports = router;
