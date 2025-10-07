@@ -93,6 +93,16 @@ function mapPublicUser(userDoc) {
 router.get(
   '/metrics',
   asyncHandler(async (req, res) => {
+    // Check database connection first
+    const dbError = checkDatabaseConnection();
+    if (dbError) {
+      return res.status(503).json({
+        ...dbError,
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        method: req.method
+      });
+    }
     const cacheKey = 'public:metrics:v1';
     if (isRedisEnabled()) {
       try {
@@ -104,35 +114,52 @@ router.get(
       } catch (_) { /* ignore cache errors */ }
     }
 
-    const [researchProjects, publications, labMembers] = await Promise.all([
-      // Count all projects as research projects for now
-      Project.countDocuments({}),
-      // Approximate publications by News items tagged as paper or category named Research
-      News.countDocuments({ $or: [ { tags: 'paper' }, { categoryId: { $exists: true } } ] }),
-      // Active lab members (exclude admin/community)
-      User.countDocuments({ isActive: true, role: { $in: ['team_member', 'mentor', 'researcher'] } }),
-    ]);
+    try {
+      const [researchProjects, publications, labMembers] = await Promise.all([
+        // Count all projects as research projects for now
+        Project.countDocuments({}),
+        // Approximate publications by News items tagged as paper or category named Research
+        News.countDocuments({ $or: [ { tags: 'paper' }, { categoryId: { $exists: true } } ] }),
+        // Active lab members (exclude admin/community)
+        User.countDocuments({ isActive: true, role: { $in: ['team_member', 'mentor', 'researcher'] } }),
+      ]);
 
-    const payload = {
-      success: true,
-      data: {
-        counts: { researchProjects, publications, labMembers },
-        labels: {
-          researchProjects: `${researchProjects}+`,
-          publications: `${publications}+`,
-          labMembers: `${labMembers}+`,
+      const payload = {
+        success: true,
+        data: {
+          counts: { researchProjects, publications, labMembers },
+          labels: {
+            researchProjects: `${researchProjects}+`,
+            publications: `${publications}+`,
+            labMembers: `${labMembers}+`,
+          },
         },
-      },
-    };
+      };
 
-    if (isRedisEnabled()) {
-      try {
-        const redis = getRedisClient();
-        await redis.setEx(cacheKey, 300, JSON.stringify(payload));
-      } catch (_) { /* ignore cache errors */ }
+      if (isRedisEnabled()) {
+        try {
+          const redis = getRedisClient();
+          await redis.setEx(cacheKey, 300, JSON.stringify(payload));
+        } catch (_) { /* ignore cache errors */ }
+      }
+
+      return res.json(payload);
+    } catch (error) {
+      const isInitError = /before initial connection is complete/i.test(error?.message || '');
+      return res.status(isInitError ? 503 : 500).json({
+        success: false,
+        error: {
+          message: isInitError
+            ? 'Database is starting up. Please retry shortly.'
+            : 'Database operation failed',
+          details: error.message,
+          code: isInitError ? 'DATABASE_NOT_READY' : 'DATABASE_ERROR',
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        method: req.method,
+      });
     }
-
-    res.json(payload);
   })
 );
 
@@ -142,6 +169,16 @@ router.get(
 router.get(
   '/people',
   asyncHandler(async (req, res) => {
+    // Check database connection first
+    const dbError = checkDatabaseConnection();
+    if (dbError) {
+      return res.status(503).json({
+        ...dbError,
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        method: req.method
+      });
+    }
     const { role, q, department } = req.query;
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
     const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
@@ -152,24 +189,41 @@ router.get(
     if (department) filter.department = department;
     if (q) filter.$text = { $search: q };
 
-    const [users, total] = await Promise.all([
-      User.find(filter)
-        .select(publicUserProjection)
-        .limit(limit)
-        .skip(skip)
-        .sort({ role: 1, createdAt: -1 }),
-      User.countDocuments(filter),
-    ]);
+    try {
+      const [users, total] = await Promise.all([
+        User.find(filter)
+          .select(publicUserProjection)
+          .limit(limit)
+          .skip(skip)
+          .sort({ role: 1, createdAt: -1 }),
+        User.countDocuments(filter),
+      ]);
 
-    const items = users.map(mapPublicUser);
+      const items = users.map(mapPublicUser);
 
-    res.json({
-      success: true,
-      data: {
-        items,
-        pagination: { total, limit, skip, hasMore: total > skip + items.length },
-      },
-    });
+      res.json({
+        success: true,
+        data: {
+          items,
+          pagination: { total, limit, skip, hasMore: total > skip + items.length },
+        },
+      });
+    } catch (error) {
+      const isInitError = /before initial connection is complete/i.test(error?.message || '');
+      return res.status(isInitError ? 503 : 500).json({
+        success: false,
+        error: {
+          message: isInitError
+            ? 'Database is starting up. Please retry shortly.'
+            : 'Database operation failed',
+          details: error.message,
+          code: isInitError ? 'DATABASE_NOT_READY' : 'DATABASE_ERROR',
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        method: req.method,
+      });
+    }
   })
 );
 
