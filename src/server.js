@@ -10,7 +10,7 @@ const xss = require('xss-clean');
 const hpp = require('hpp');
 require('dotenv').config();
 
-const { connectDB } = require('./config/database');
+const { connectDB, getConnectionStatus } = require('./config/database');
 const { connectRedis } = require('./config/redis');
 const { setupSocketIO } = require('./config/socket');
 const logger = require('./utils/logger');
@@ -134,6 +134,7 @@ app.get('/', (req, res) => {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
+  const db = getConnectionStatus();
   res.status(200).json({
     status: 'OK',
     timestamp: new Date().toISOString(),
@@ -141,7 +142,8 @@ app.get('/health', (req, res) => {
     environment: process.env.NODE_ENV,
     version: require('../package.json').version,
     message: 'NewtonBotics Backend API is running',
-    database: process.env.MONGODB_URI ? 'Connected' : 'Not configured',
+    database: db.hasMongoURI ? (db.isConnected ? 'Connected' : 'Not connected') : 'Not configured',
+    databaseDetails: db,
     redis: (process.env.REDIS_HOST && process.env.REDIS_PORT) ? 'Configured' : 'Not configured'
   });
 });
