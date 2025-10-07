@@ -3,6 +3,8 @@ const logger = require('../utils/logger');
 
 let isConnected = false;
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const connectDB = async () => {
   if (isConnected) {
     logger.info('MongoDB already connected');
@@ -21,13 +23,31 @@ const connectDB = async () => {
 
     const options = {
       maxPoolSize: 5, // Reduced for serverless
-      serverSelectionTimeoutMS: 3000, // Faster timeout for Vercel
-      socketTimeoutMS: 10000, // Reduced timeout
-      connectTimeoutMS: 3000, // Connection timeout
+      serverSelectionTimeoutMS: parseInt(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS) || 10000,
+      socketTimeoutMS: parseInt(process.env.MONGO_SOCKET_TIMEOUT_MS) || 20000,
+      connectTimeoutMS: parseInt(process.env.MONGO_CONNECT_TIMEOUT_MS) || 10000,
       bufferCommands: false, // Disable buffering for serverless
     };
 
-    await mongoose.connect(mongoURI, options);
+    const maxAttempts = parseInt(process.env.MONGO_CONNECT_RETRIES) || 5;
+    let lastError = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        logger.info(`Attempting MongoDB connection (attempt ${attempt}/${maxAttempts})`);
+        await mongoose.connect(mongoURI, options);
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error;
+        const backoffMs = Math.min(15000, 500 * 2 ** (attempt - 1));
+        logger.warn(`MongoDB connection attempt ${attempt} failed: ${error.message}. Retrying in ${backoffMs}ms`);
+        await sleep(backoffMs);
+      }
+    }
+
+    if (lastError) {
+      throw lastError;
+    }
 
     isConnected = true;
     logger.info(`MongoDB connected successfully to ${mongoURI.split('@')[1] || mongoURI.split('//')[1]}`);
