@@ -36,7 +36,8 @@ const researchAreaRoutes = require('./routes/researchAreas');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const HOST = process.env.HOST || 'localhost';
+// Bind to all interfaces by default for PaaS platforms (Render, Railway, etc.)
+const HOST = process.env.HOST || '0.0.0.0';
 
 // Security middleware
 app.use(helmet({
