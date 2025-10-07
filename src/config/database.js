@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const logger = require('../utils/logger');
 
 let isConnected = false;
+let lastConnectionError = null;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -39,6 +40,7 @@ const connectDB = async () => {
         break;
       } catch (error) {
         lastError = error;
+        lastConnectionError = error?.message || String(error);
         const backoffMs = Math.min(15000, 500 * 2 ** (attempt - 1));
         logger.warn(`MongoDB connection attempt ${attempt} failed: ${error.message}. Retrying in ${backoffMs}ms`);
         await sleep(backoffMs);
@@ -46,6 +48,7 @@ const connectDB = async () => {
     }
 
     if (lastError) {
+      logger.error('Exhausted MongoDB connection retries:', lastError);
       throw lastError;
     }
 
@@ -56,6 +59,7 @@ const connectDB = async () => {
     mongoose.connection.on('error', (error) => {
       logger.error('MongoDB connection error:', error);
       isConnected = false;
+      lastConnectionError = error?.message || String(error);
     });
 
     mongoose.connection.on('disconnected', () => {
@@ -83,6 +87,7 @@ const connectDB = async () => {
   } catch (error) {
     logger.error('MongoDB connection failed:', error);
     isConnected = false;
+    lastConnectionError = error?.message || String(error);
     throw error;
   }
 };
@@ -108,6 +113,7 @@ const getConnectionStatus = () => {
     port: mongoose.connection.port || 'Not connected',
     name: mongoose.connection.name || 'Not connected',
     hasMongoURI: !!process.env.MONGODB_URI,
+    lastError: lastConnectionError,
   };
 };
 
