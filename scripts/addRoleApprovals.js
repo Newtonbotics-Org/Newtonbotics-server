@@ -6,11 +6,14 @@ const RoleApproval = require('../src/models/RoleApproval');
 
 async function connect() {
   const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/newtonbotics';
-  await mongoose.connect(uri, {
-    maxPoolSize: 5,
-    serverSelectionTimeoutMS: 5000,
-  });
-  console.log('Connected to MongoDB');
+  await mongoose.connect(process.env.MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+    family: 4 // forces IPv4
+  })
+  .then(() => console.log("✅ MongoDB Connected"))
+  .catch(err => console.error("❌ MongoDB Connection Error:", err));
+  
 }
 
 async function ensureRoleApproval({ email, allowedRoles, note }) {
