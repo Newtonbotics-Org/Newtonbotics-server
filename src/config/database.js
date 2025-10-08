@@ -29,7 +29,7 @@ const connectDB = async () => {
       connectTimeoutMS: parseInt(process.env.MONGO_CONNECT_TIMEOUT_MS) || 10000,
       bufferCommands: false, // Disable buffering for serverless
     };
-
+    console.log('connecting with mongoURI', mongoURI);
     const maxAttempts = parseInt(process.env.MONGO_CONNECT_RETRIES) || 5;
     let lastError = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
