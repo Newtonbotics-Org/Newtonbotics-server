@@ -89,37 +89,37 @@ function mapPublicUser(userDoc) {
 }
 
 // GET /api/public/metrics
-// Returns homepage metrics (projects, publications, lab members)
+// Returns homepage metrics (projects, publications, lab members) 
 router.get(
   '/metrics',
-  asyncHandler(async (req, res) => {
+  async(req, res) => {
     // Check database connection first
-    const dbError = checkDatabaseConnection();
-    if (dbError) {
-      return res.status(503).json({
-        ...dbError,
-        timestamp: new Date().toISOString(),
-        path: req.path,
-        method: req.method
-      });
-    }
-    const cacheKey = 'public:metrics:v1';
-    if (isRedisEnabled()) {
-      try {
-        const redis = getRedisClient();
-        const cached = await redis.get(cacheKey);
-        if (cached) {
-          return res.json(JSON.parse(cached));
-        }
-      } catch (_) { /* ignore cache errors */ }
-    }
+    // const dbError = checkDatabaseConnection();
+    // if (dbError) {
+    //   return res.status(503).json({
+    //     ...dbError,
+    //     timestamp: new Date().toISOString(),
+    //     path: req.path,
+    //     method: req.method
+    //   });
+    // }
+    // const cacheKey = 'public:metrics:v1';
+    // if (isRedisEnabled()) {
+    //   try {
+    //     const redis = getRedisClient();
+    //     const cached = await redis.get(cacheKey);
+    //     if (cached) {
+    //       return res.json(JSON.parse(cached));
+    //     }
+    //   } catch (_) { /* ignore cache errors */ }
+    // }
 
     try {
       const [researchProjects, publications, labMembers] = await Promise.all([
         // Count all projects as research projects for now
         Project.countDocuments({}),
         // Approximate publications by News items tagged as paper or category named Research
-        News.countDocuments({ $or: [ { tags: 'paper' }, { categoryId: { $exists: true } } ] }),
+        News.countDocuments({ $or: [{ tags: 'paper' }, { categoryId: { $exists: true } }] }),
         // Active lab members (exclude admin/community)
         User.countDocuments({ isActive: true, role: { $in: ['team_member', 'mentor', 'researcher'] } }),
       ]);
@@ -136,31 +136,34 @@ router.get(
         },
       };
 
-      if (isRedisEnabled()) {
-        try {
-          const redis = getRedisClient();
-          await redis.setEx(cacheKey, 300, JSON.stringify(payload));
-        } catch (_) { /* ignore cache errors */ }
-      }
+      // if (isRedisEnabled()) {
+      //   try {
+      //     const redis = getRedisClient();
+      //     await redis.setEx(cacheKey, 300, JSON.stringify(payload));
+      //   } catch (_) { /* ignore cache errors */ }
+      // }
 
       return res.json(payload);
     } catch (error) {
-      const isInitError = /before initial connection is complete/i.test(error?.message || '');
-      return res.status(isInitError ? 503 : 500).json({
-        success: false,
-        error: {
-          message: isInitError
-            ? 'Database is starting up. Please retry shortly.'
-            : 'Database operation failed',
-          details: error.message,
-          code: isInitError ? 'DATABASE_NOT_READY' : 'DATABASE_ERROR',
-        },
-        timestamp: new Date().toISOString(),
-        path: req.path,
-        method: req.method,
+      return res.status(500).json({
+        error: "Internal Server Error",
       });
+      // const isInitError = /before initial connection is complete/i.test(error?.message || '');
+      // return res.status(isInitError ? 503 : 500).json({
+      //   success: false,
+      //   error: {
+      //     message: isInitError
+      //       ? 'Database is starting up. Please retry shortly.'
+      //       : 'Database operation failed',
+      //     details: error.message,
+      //     code: isInitError ? 'DATABASE_NOT_READY' : 'DATABASE_ERROR',
+      //   },
+      //   timestamp: new Date().toISOString(),
+      //   path: req.path,
+      //   method: req.method,
+      // });
     }
-  })
+  }
 );
 
 // GET /api/public/people
@@ -298,12 +301,12 @@ router.get('/leadership-team', asyncHandler(async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
   const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
 
-  const filter = { 
-    isActive: true, 
+  const filter = {
+    isActive: true,
     role: 'team_member',
     subroles: { $exists: true, $ne: [], $not: { $size: 0 } } // Has at least one subrole
   };
-  
+
   if (department) filter.department = department;
   if (q) filter.$text = { $search: q };
 
@@ -357,8 +360,8 @@ router.get('/team-directory', asyncHandler(async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
   const skip = Math.max(parseInt(req.query.skip, 10) || 0, 0);
 
-  const filter = { 
-    isActive: true, 
+  const filter = {
+    isActive: true,
     role: 'team_member',
     $or: [
       { subroles: { $exists: false } }, // No subroles field
@@ -366,7 +369,7 @@ router.get('/team-directory', asyncHandler(async (req, res) => {
       { subroles: null } // Null subroles
     ]
   };
-  
+
   if (department) filter.department = department;
   if (q) filter.$text = { $search: q };
 
