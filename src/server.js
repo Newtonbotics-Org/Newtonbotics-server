@@ -55,36 +55,9 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
-// CORS configuration
+// CORS configuration (simplified to allow all origins; tighten later if needed)
 app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-
-    // For development, allow any localhost origin
-    if (process.env.NODE_ENV === 'development' && origin.includes('localhost')) {
-      console.log('CORS check - Development mode, allowing localhost:', origin);
-      return callback(null, true);
-    }
-
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:3003',
-      'http://localhost:3005',
-      process.env.CORS_ORIGIN
-    ].filter(Boolean); // Remove any undefined values
-
-    console.log('CORS check - Origin:', origin);
-    console.log('CORS check - Allowed origins:', allowedOrigins);
-
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      console.log('CORS check - Allowed');
-      callback(null, true);
-    } else {
-      console.log('CORS check - Blocked');
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
@@ -92,6 +65,16 @@ app.use(cors({
 
 // Request context & simple console logging
 app.use(require('./middleware/requestContext'));
+
+// Ensure MongoDB connection per request (safe for serverless)
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+  } catch (e) {
+    // Proceed even if DB is unavailable; route handlers can handle accordingly
+  }
+  next();
+});
 
 // Rate limiting
 const limiter = rateLimit({
@@ -270,18 +253,24 @@ app.use(errorHandler);
 //   startServer();
 // }
 
-mongoose
-        .connect(process.env.MONGODB_URI, {
-          useNewUrlParser: true,
-          useUnifiedTopology: true,
-        })
-        .then(() => {app.listen(PORT, HOST, () => {
-          logger.info(`🚀 NewtonBotics Backend Server running on http://${HOST}:${PORT}`);
-          logger.info(`📊 Environment: ${process.env.NODE_ENV}`);
-          logger.info(`🔗 Health Check: http://${HOST}:${PORT}/health`);
-        });
-        })
-        .catch((error) => {
-          logger.error('❌ Failed to connect to MongoDB:', error);
-        });
+// Start HTTP server only in non-serverless environments
+if (!process.env.VERCEL && process.env.NODE_ENV !== 'test') {
+  (async () => {
+    try {
+      await connectDB();
+    } catch (err) {
+      logger.warn('Starting without MongoDB connection');
+    }
+    const server = app.listen(PORT, HOST, () => {
+      logger.info(`🚀 NewtonBotics Backend Server running on http://${HOST}:${PORT}`);
+      logger.info(`📊 Environment: ${process.env.NODE_ENV}`);
+      logger.info(`🔗 Health Check: http://${HOST}:${PORT}/health`);
+    });
+    try {
+      setupSocketIO(server);
+    } catch (e) {
+      logger.warn('Socket.IO not initialized');
+    }
+  })();
+}
 module.exports = app;

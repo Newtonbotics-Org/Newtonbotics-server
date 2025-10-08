@@ -24,7 +24,9 @@
     "db:migrate": "node scripts/migrate.js",
     "db:seed": "node scripts/seed.js",
     "db:reset": "node scripts/reset.js",
-    "docs:pdf": "node scripts/exportEquipmentGuidePdf.js"
+    "docs:pdf": "node scripts/exportEquipmentGuidePdf.js",
+    "test:api": "node scripts/apiFullTest.js",
+    "test:api:seed": "node scripts/seed.js && node scripts/apiFullTest.js"
   },
   "keywords": [
     "robotics",
