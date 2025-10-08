@@ -33,6 +33,9 @@ const messageRoutes = require('./routes/messages');
 const publicRoutes = require('./routes/public');
 const roleApprovalRoutes = require('./routes/roleApprovals');
 const researchAreaRoutes = require('./routes/researchAreas');
+const { default: mongoose } = require('mongoose');
+const ContactSubmission = require('./models/ContactSubmission');
+const User = require('./models/User');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -57,23 +60,23 @@ app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
-    
+
     // For development, allow any localhost origin
     if (process.env.NODE_ENV === 'development' && origin.includes('localhost')) {
       console.log('CORS check - Development mode, allowing localhost:', origin);
       return callback(null, true);
     }
-    
+
     const allowedOrigins = [
       'http://localhost:3000',
       'http://localhost:3003',
       'http://localhost:3005',
       process.env.CORS_ORIGIN
     ].filter(Boolean); // Remove any undefined values
-    
+
     console.log('CORS check - Origin:', origin);
     console.log('CORS check - Allowed origins:', allowedOrigins);
-    
+
     if (allowedOrigins.indexOf(origin) !== -1) {
       console.log('CORS check - Allowed');
       callback(null, true);
@@ -134,8 +137,10 @@ app.get('/', (req, res) => {
 });
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
   const db = getConnectionStatus();
+  const user = await User.find()
+  console.log('✅ Found contact submissions:', user);
   res.status(200).json({
     status: 'OK',
     timestamp: new Date().toISOString(),
@@ -170,92 +175,113 @@ app.use('/api/research-areas', researchAreaRoutes);
 app.use(notFoundHandler);
 app.use(errorHandler);
 
-// Start server
-async function startServer() {
-  try {
-    // Connect to MongoDB only if MONGODB_URI is available
-    if (process.env.MONGODB_URI) {
-      await connectDB();
-      logger.info('✅ Connected to MongoDB');
-    } else {
-      logger.warn('⚠️ MONGODB_URI not found, skipping database connection');
-    }
+// // Start server
+// async function startServer() {
+//   try {
+//     // Connect to MongoDB only if MONGODB_URI is available
+//     if (process.env.MONGODB_URI) {
+//       await mongoose
+//         .connect(process.env.MONGODB_URI, {
+//           useNewUrlParser: true,
+//           useUnifiedTopology: true,
+//         })
 
-    // Connect to Redis (optional in dev)
-    if (process.env.REDIS_HOST && process.env.REDIS_PORT) {
-      try {
-        await connectRedis();
-        logger.info('✅ Connected to Redis');
-      } catch (redisError) {
-        logger.warn(`⚠️ Redis not available: ${redisError.message}. Continuing without Redis.`);
-      }
-    } else {
-      logger.warn('⚠️ Redis configuration not found, skipping Redis connection');
-    }
+//         const submissions = await ContactSubmission.find()
+//         logger.info('✅ Found contact submissions:', submissions);
+//       logger.info('✅ Connected to MongoDB');
+//     } else {
+//       logger.warn('⚠️ MONGODB_URI not found, skipping database connection');
+//     }
 
-    // Start HTTP server
-    const server = app.listen(PORT, HOST, () => {
-      logger.info(`🚀 NewtonBotics Backend Server running on http://${HOST}:${PORT}`);
-      logger.info(`📊 Environment: ${process.env.NODE_ENV}`);
-      logger.info(`🔗 Health Check: http://${HOST}:${PORT}/health`);
-    });
+//     // Connect to Redis (optional in dev)
+//     if (process.env.REDIS_HOST && process.env.REDIS_PORT) {
+//       try {
+//         await connectRedis();
+//         logger.info('✅ Connected to Redis');
+//       } catch (redisError) {
+//         logger.warn(`⚠️ Redis not available: ${redisError.message}. Continuing without Redis.`);
+//       }
+//     } else {
+//       logger.warn('⚠️ Redis configuration not found, skipping Redis connection');
+//     }
 
-    // Setup Socket.IO only if we have a server
-    if (server) {
-      setupSocketIO(server);
-      logger.info('✅ Socket.IO initialized');
-    }
+//     // Start HTTP server
+//     const server = app.listen(PORT, HOST, () => {
+//       logger.info(`🚀 NewtonBotics Backend Server running on http://${HOST}:${PORT}`);
+//       logger.info(`📊 Environment: ${process.env.NODE_ENV}`);
+//       logger.info(`🔗 Health Check: http://${HOST}:${PORT}/health`);
+//     });
 
-    // Graceful shutdown
-    process.on('SIGTERM', () => {
-      logger.info('SIGTERM received, shutting down gracefully');
-      if (server) {
-        server.close(() => {
-          logger.info('Process terminated');
-          process.exit(0);
+//     // Setup Socket.IO only if we have a server
+//     if (server) {
+//       setupSocketIO(server);
+//       logger.info('✅ Socket.IO initialized');
+//     }
+
+//     // Graceful shutdown
+//     process.on('SIGTERM', () => {
+//       logger.info('SIGTERM received, shutting down gracefully');
+//       if (server) {
+//         server.close(() => {
+//           logger.info('Process terminated');
+//           process.exit(0);
+//         });
+//       } else {
+//         process.exit(0);
+//       }
+//     });
+
+//     process.on('SIGINT', () => {
+//       logger.info('SIGINT received, shutting down gracefully');
+//       if (server) {
+//         server.close(() => {
+//           logger.info('Process terminated');
+//           process.exit(0);
+//         });
+//       } else {
+//         process.exit(0);
+//       }
+//     });
+
+//   } catch (error) {
+//     logger.error('❌ Failed to start server:', error);
+//     // Don't exit on Vercel, just log the error
+//     if (process.env.NODE_ENV === 'production') {
+//       logger.error('Running in production mode, continuing without database connection');
+//     } else {
+//       process.exit(1);
+//     }
+//   }
+// }
+
+// // Handle uncaught exceptions
+// process.on('uncaughtException', (error) => {
+//   logger.error('Uncaught Exception:', error);
+//   process.exit(1);
+// });
+
+// // Handle unhandled promise rejections
+// process.on('unhandledRejection', (reason, promise) => {
+//   logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+//   process.exit(1);
+// });
+
+// if (process.env.NODE_ENV !== 'test') {
+//   startServer();
+// }
+
+mongoose
+        .connect(process.env.MONGODB_URI, {
+          useNewUrlParser: true,
+          useUnifiedTopology: true,
+        })
+        .then(() => {app.listen(PORT, HOST, () => {
+          logger.info(`🚀 NewtonBotics Backend Server running on http://${HOST}:${PORT}`);
+          logger.info(`📊 Environment: ${process.env.NODE_ENV}`);
+          logger.info(`🔗 Health Check: http://${HOST}:${PORT}/health`);
         });
-      } else {
-        process.exit(0);
-      }
-    });
-
-    process.on('SIGINT', () => {
-      logger.info('SIGINT received, shutting down gracefully');
-      if (server) {
-        server.close(() => {
-          logger.info('Process terminated');
-          process.exit(0);
+        })
+        .catch((error) => {
+          logger.error('❌ Failed to connect to MongoDB:', error);
         });
-      } else {
-        process.exit(0);
-      }
-    });
-
-  } catch (error) {
-    logger.error('❌ Failed to start server:', error);
-    // Don't exit on Vercel, just log the error
-    if (process.env.NODE_ENV === 'production') {
-      logger.error('Running in production mode, continuing without database connection');
-    } else {
-      process.exit(1);
-    }
-  }
-}
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-  logger.error('Uncaught Exception:', error);
-  process.exit(1);
-});
-
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  process.exit(1);
-});
-
-if (process.env.NODE_ENV !== 'test') {
-  startServer();
-}
-
 module.exports = app;
