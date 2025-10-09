@@ -4,6 +4,8 @@ const router = express.Router();
 const Project = require('../models/Project');
 const News = require('../models/News');
 const User = require('../models/User');
+const Workshop = require('../models/Workshop');
+const ResearchArea = require('../models/ResearchArea');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { getRedisClient } = require('../config/redis');
 const { getConnectionStatus } = require('../config/database');
@@ -89,81 +91,169 @@ function mapPublicUser(userDoc) {
 }
 
 // GET /api/public/metrics
-// Returns homepage metrics (projects, publications, lab members) 
+// Returns comprehensive impact metrics (projects, publications, lab members, industry partners, awards, workshops)
 router.get(
   '/metrics',
-  async(req, res) => {
+  asyncHandler(async (req, res) => {
     // Check database connection first
-    // const dbError = checkDatabaseConnection();
-    // if (dbError) {
-    //   return res.status(503).json({
-    //     ...dbError,
-    //     timestamp: new Date().toISOString(),
-    //     path: req.path,
-    //     method: req.method
-    //   });
-    // }
-    // const cacheKey = 'public:metrics:v1';
-    // if (isRedisEnabled()) {
-    //   try {
-    //     const redis = getRedisClient();
-    //     const cached = await redis.get(cacheKey);
-    //     if (cached) {
-    //       return res.json(JSON.parse(cached));
-    //     }
-    //   } catch (_) { /* ignore cache errors */ }
-    // }
+    const dbError = checkDatabaseConnection();
+    if (dbError) {
+      return res.status(503).json({
+        ...dbError,
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        method: req.method
+      });
+    }
+
+    const cacheKey = 'public:impact-metrics:v2';
+    if (isRedisEnabled()) {
+      try {
+        const redis = getRedisClient();
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+          return res.json(JSON.parse(cached));
+        }
+      } catch (_) { /* ignore cache errors */ }
+    }
 
     try {
-      const [researchProjects, publications, labMembers] = await Promise.all([
-        // Count all projects as research projects for now
-        Project.countDocuments({}),
-        // Approximate publications by News items tagged as paper or category named Research
-        News.countDocuments({ $or: [{ tags: 'paper' }, { categoryId: { $exists: true } }] }),
-        // Active lab members (exclude admin/community)
-        User.countDocuments({ isActive: true, role: { $in: ['team_member', 'mentor', 'researcher'] } }),
+      const [
+        projects,
+        publications,
+        labMembers,
+        industryPartners,
+        awardsWon,
+        workshopsConducted
+      ] = await Promise.all([
+        // Count all projects (research projects)
+        Project.countDocuments({ isPublic: true }),
+        
+        // Count publications from multiple sources:
+        // 1. News items tagged as 'publication', 'paper', 'research'
+        // 2. ResearchArea publication counts
+        Promise.all([
+          News.countDocuments({ 
+            isPublished: true,
+            $or: [
+              { tags: { $in: ['publication', 'paper', 'research', 'journal'] } },
+              { 'tags': /publication|paper|research|journal/i }
+            ]
+          }),
+          ResearchArea.aggregate([
+            { $group: { _id: null, totalPublications: { $sum: '$publicationCount' } } }
+          ])
+        ]).then(([newsPublications, researchAreaPublications]) => {
+          const researchAreaCount = researchAreaPublications[0]?.totalPublications || 0;
+          return newsPublications + researchAreaCount;
+        }),
+        
+        // Active lab members (team_member, mentor, researcher roles)
+        User.countDocuments({ 
+          isActive: true, 
+          role: { $in: ['team_member', 'mentor', 'researcher'] } 
+        }),
+        
+        // Industry partners - users with industry-related subroles or achievements
+        User.countDocuments({
+          isActive: true,
+          $or: [
+            { 
+              subroles: { 
+                $in: [
+                  'industry_liaison', 
+                  'partnership_coordinator', 
+                  'business_developer',
+                  'startup_mentor',
+                  'patent_officer',
+                  'technology_transfer'
+                ] 
+              } 
+            },
+            { 
+              'achievements.type': 'patent',
+              'achievements': { $exists: true, $ne: [] }
+            }
+          ]
+        }),
+        
+        // Awards won - from user achievements and project achievements
+        Promise.all([
+          User.aggregate([
+            { 
+              $match: { 
+                'achievements.type': 'award',
+                'achievements': { $exists: true, $ne: [] }
+              }
+            },
+            { $unwind: '$achievements' },
+            { $match: { 'achievements.type': 'award' } },
+            { $count: 'totalAwards' }
+          ]),
+          Project.aggregate([
+            { $match: { achievements: { $exists: true, $ne: [] } } },
+            { $unwind: '$achievements' },
+            { $count: 'totalAwards' }
+          ])
+        ]).then(([userAwards, projectAwards]) => {
+          const userAwardCount = userAwards[0]?.totalAwards || 0;
+          const projectAwardCount = projectAwards[0]?.totalAwards || 0;
+          return userAwardCount + projectAwardCount;
+        }),
+        
+        // Workshops conducted (completed workshops)
+        Workshop.countDocuments({ status: 'completed' })
       ]);
 
       const payload = {
         success: true,
         data: {
-          counts: { researchProjects, publications, labMembers },
+          impactCounts: {
+            projects,
+            publications,
+            labMembers,
+            industryPartners,
+            awardsWon,
+            workshopsConducted
+          },
           labels: {
-            researchProjects: `${researchProjects}+`,
+            projects: `${projects}+`,
             publications: `${publications}+`,
             labMembers: `${labMembers}+`,
+            industryPartners: `${industryPartners}+`,
+            awardsWon: `${awardsWon}+`,
+            workshopsConducted: `${workshopsConducted}+`
           },
-        },
+          lastUpdated: new Date().toISOString()
+        }
       };
 
-      // if (isRedisEnabled()) {
-      //   try {
-      //     const redis = getRedisClient();
-      //     await redis.setEx(cacheKey, 300, JSON.stringify(payload));
-      //   } catch (_) { /* ignore cache errors */ }
-      // }
+      // Cache the result for 5 minutes
+      if (isRedisEnabled()) {
+        try {
+          const redis = getRedisClient();
+          await redis.setEx(cacheKey, 300, JSON.stringify(payload));
+        } catch (_) { /* ignore cache errors */ }
+      }
 
       return res.json(payload);
     } catch (error) {
-      return res.status(500).json({
-        error: "Internal Server Error",
+      const isInitError = /before initial connection is complete/i.test(error?.message || '');
+      return res.status(isInitError ? 503 : 500).json({
+        success: false,
+        error: {
+          message: isInitError
+            ? 'Database is starting up. Please retry shortly.'
+            : 'Failed to fetch impact metrics',
+          details: error.message,
+          code: isInitError ? 'DATABASE_NOT_READY' : 'METRICS_ERROR',
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        method: req.method,
       });
-      // const isInitError = /before initial connection is complete/i.test(error?.message || '');
-      // return res.status(isInitError ? 503 : 500).json({
-      //   success: false,
-      //   error: {
-      //     message: isInitError
-      //       ? 'Database is starting up. Please retry shortly.'
-      //       : 'Database operation failed',
-      //     details: error.message,
-      //     code: isInitError ? 'DATABASE_NOT_READY' : 'DATABASE_ERROR',
-      //   },
-      //   timestamp: new Date().toISOString(),
-      //   path: req.path,
-      //   method: req.method,
-      // });
     }
-  }
+  })
 );
 
 // GET /api/public/people

@@ -1,8 +1,10 @@
 const express = require('express');
-const { body, validationResult } = require('express-validator');
+const { body, param, query, validationResult } = require('express-validator');
 const router = express.Router();
 const NewsletterSubscription = require('../models/NewsletterSubscription');
-const { asyncHandler, validationErrorHandler } = require('../middleware/errorHandler');
+const { asyncHandler, validationErrorHandler, notFoundErrorHandler } = require('../middleware/errorHandler');
+const { verifyToken, requireAdmin } = require('../middleware/auth');
+const logger = require('../utils/logger');
 
 // POST /api/newsletter/subscribe
 router.post(
@@ -34,6 +36,39 @@ router.post(
   })
 );
 
+// GET /api/newsletter/status/:email
+router.get(
+  '/status/:email',
+  [param('email').isEmail().normalizeEmail().isLength({ max: 255 })],
+  asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) throw validationErrorHandler(errors);
+    
+    const { email } = req.params;
+    const sub = await NewsletterSubscription.findOne({ email });
+    
+    if (!sub) {
+      return res.json({ 
+        success: true, 
+        message: 'Email not found in subscription list',
+        data: { 
+          isSubscribed: false,
+          subscription: null 
+        }
+      });
+    }
+    
+    res.json({ 
+      success: true, 
+      message: sub.isActive ? 'Email is subscribed' : 'Email is unsubscribed',
+      data: { 
+        isSubscribed: sub.isActive,
+        subscription: sub 
+      }
+    });
+  })
+);
+
 // DELETE /api/newsletter/unsubscribe
 router.delete(
   '/unsubscribe',
@@ -50,6 +85,408 @@ router.delete(
     sub.unsubscribedAt = new Date();
     await sub.save();
     res.json({ success: true, message: 'Unsubscribed successfully' });
+  })
+);
+
+// ==================== ADMIN ROUTES ====================
+
+// Apply authentication middleware to all admin routes
+router.use('/admin', verifyToken, requireAdmin);
+
+// Admin validation rules
+const adminSearchValidation = [
+  query('q')
+    .optional()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Search query must be between 1 and 100 characters'),
+  
+  query('status')
+    .optional()
+    .isIn(['active', 'inactive', 'all'])
+    .withMessage('Status must be active, inactive, or all'),
+  
+  query('limit')
+    .optional()
+    .isInt({ min: 1, max: 100 })
+    .withMessage('Limit must be between 1 and 100'),
+  
+  query('skip')
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage('Skip must be a non-negative integer'),
+  
+  query('sortBy')
+    .optional()
+    .isIn(['email', 'firstName', 'lastName', 'subscribedAt', 'unsubscribedAt', 'createdAt'])
+    .withMessage('Invalid sort field'),
+  
+  query('sortOrder')
+    .optional()
+    .isIn(['asc', 'desc'])
+    .withMessage('Sort order must be asc or desc'),
+];
+
+const adminUpdateValidation = [
+  body('firstName').optional().isString().isLength({ max: 100 }),
+  body('lastName').optional().isString().isLength({ max: 100 }),
+  body('isActive').optional().isBoolean(),
+];
+
+const bulkOperationValidation = [
+  body('emails').isArray().isLength({ min: 1, max: 100 }),
+  body('emails.*').isEmail().normalizeEmail(),
+  body('action').isIn(['activate', 'deactivate', 'delete']),
+];
+
+// GET /api/newsletter/admin/subscriptions - List all newsletter subscriptions (Admin only)
+router.get(
+  '/admin/subscriptions',
+  adminSearchValidation,
+  asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) throw validationErrorHandler(errors);
+
+    const { 
+      q, 
+      status = 'all', 
+      limit = 20, 
+      skip = 0, 
+      sortBy = 'subscribedAt', 
+      sortOrder = 'desc' 
+    } = req.query;
+
+    // Build search query
+    const searchQuery = {};
+    
+    if (q) {
+      searchQuery.$or = [
+        { email: { $regex: q, $options: 'i' } },
+        { firstName: { $regex: q, $options: 'i' } },
+        { lastName: { $regex: q, $options: 'i' } }
+      ];
+    }
+    
+    if (status !== 'all') {
+      searchQuery.isActive = status === 'active';
+    }
+
+    // Build sort object
+    const sort = {};
+    sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+
+    // Execute query
+    const subscriptions = await NewsletterSubscription
+      .find(searchQuery)
+      .sort(sort)
+      .limit(parseInt(limit))
+      .skip(parseInt(skip))
+      .lean();
+
+    const total = await NewsletterSubscription.countDocuments(searchQuery);
+
+    // Log admin search operation
+    logger.info(`Newsletter subscriptions searched by admin ${req.user.id}`, {
+      query: q,
+      status,
+      results: subscriptions.length,
+      total
+    });
+
+    res.json({
+      success: true,
+      data: {
+        subscriptions,
+        pagination: {
+          total,
+          limit: parseInt(limit),
+          skip: parseInt(skip),
+          hasMore: total > parseInt(skip) + subscriptions.length
+        }
+      }
+    });
+  })
+);
+
+// GET /api/newsletter/admin/subscriptions/:id - Get specific subscription (Admin only)
+router.get(
+  '/admin/subscriptions/:id',
+  [param('id').isMongoId()],
+  asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) throw validationErrorHandler(errors);
+
+    const subscription = await NewsletterSubscription.findById(req.params.id);
+    if (!subscription) throw notFoundErrorHandler('Newsletter subscription');
+
+    res.json({
+      success: true,
+      data: { subscription }
+    });
+  })
+);
+
+// PUT /api/newsletter/admin/subscriptions/:id - Update subscription (Admin only)
+router.put(
+  '/admin/subscriptions/:id',
+  [param('id').isMongoId(), ...adminUpdateValidation],
+  asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) throw validationErrorHandler(errors);
+
+    const subscription = await NewsletterSubscription.findById(req.params.id);
+    if (!subscription) throw notFoundErrorHandler('Newsletter subscription');
+
+    const { firstName, lastName, isActive } = req.body;
+
+    // Update fields if provided
+    if (firstName !== undefined) subscription.firstName = firstName;
+    if (lastName !== undefined) subscription.lastName = lastName;
+    if (isActive !== undefined) {
+      subscription.isActive = isActive;
+      if (isActive) {
+        subscription.unsubscribedAt = undefined;
+      } else {
+        subscription.unsubscribedAt = new Date();
+      }
+    }
+
+    await subscription.save();
+
+    // Log admin update
+    logger.info(`Newsletter subscription updated by admin ${req.user.id}`, {
+      subscriptionId: subscription._id,
+      email: subscription.email,
+      changes: { firstName, lastName, isActive }
+    });
+
+    res.json({
+      success: true,
+      message: 'Subscription updated successfully',
+      data: { subscription }
+    });
+  })
+);
+
+// DELETE /api/newsletter/admin/subscriptions/:id - Delete subscription (Admin only)
+router.delete(
+  '/admin/subscriptions/:id',
+  [param('id').isMongoId()],
+  asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) throw validationErrorHandler(errors);
+
+    const subscription = await NewsletterSubscription.findById(req.params.id);
+    if (!subscription) throw notFoundErrorHandler('Newsletter subscription');
+
+    await NewsletterSubscription.findByIdAndDelete(req.params.id);
+
+    // Log admin deletion
+    logger.info(`Newsletter subscription deleted by admin ${req.user.id}`, {
+      subscriptionId: subscription._id,
+      email: subscription.email
+    });
+
+    res.json({
+      success: true,
+      message: 'Subscription deleted successfully'
+    });
+  })
+);
+
+// POST /api/newsletter/admin/bulk-operations - Bulk operations on subscriptions (Admin only)
+router.post(
+  '/admin/bulk-operations',
+  bulkOperationValidation,
+  asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) throw validationErrorHandler(errors);
+
+    const { emails, action } = req.body;
+    let result;
+
+    switch (action) {
+      case 'activate':
+        result = await NewsletterSubscription.updateMany(
+          { email: { $in: emails } },
+          { 
+            $set: { isActive: true },
+            $unset: { unsubscribedAt: 1 }
+          }
+        );
+        break;
+      
+      case 'deactivate':
+        result = await NewsletterSubscription.updateMany(
+          { email: { $in: emails } },
+          { 
+            $set: { 
+              isActive: false,
+              unsubscribedAt: new Date()
+            }
+          }
+        );
+        break;
+      
+      case 'delete':
+        result = await NewsletterSubscription.deleteMany(
+          { email: { $in: emails } }
+        );
+        break;
+    }
+
+    // Log bulk operation
+    logger.info(`Bulk newsletter operation performed by admin ${req.user.id}`, {
+      action,
+      emailsCount: emails.length,
+      modifiedCount: result.modifiedCount || result.deletedCount
+    });
+
+    res.json({
+      success: true,
+      message: `Bulk ${action} completed successfully`,
+      data: {
+        action,
+        emailsProcessed: emails.length,
+        modifiedCount: result.modifiedCount || result.deletedCount
+      }
+    });
+  })
+);
+
+// GET /api/newsletter/admin/statistics - Get newsletter statistics (Admin only)
+router.get(
+  '/admin/statistics',
+  asyncHandler(async (req, res) => {
+    const totalSubscriptions = await NewsletterSubscription.countDocuments();
+    const activeSubscriptions = await NewsletterSubscription.countDocuments({ isActive: true });
+    const inactiveSubscriptions = await NewsletterSubscription.countDocuments({ isActive: false });
+
+    // Get subscription trends (last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const recentSubscriptions = await NewsletterSubscription.countDocuments({
+      subscribedAt: { $gte: thirtyDaysAgo }
+    });
+
+    const recentUnsubscriptions = await NewsletterSubscription.countDocuments({
+      unsubscribedAt: { $gte: thirtyDaysAgo }
+    });
+
+    // Get top domains
+    const domainStats = await NewsletterSubscription.aggregate([
+      {
+        $group: {
+          _id: { $arrayElemAt: [{ $split: ['$email', '@'] }, 1] },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { count: -1 } },
+      { $limit: 10 }
+    ]);
+
+    // Get subscription growth by month (last 12 months)
+    const twelveMonthsAgo = new Date();
+    twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
+
+    const monthlyGrowth = await NewsletterSubscription.aggregate([
+      {
+        $match: {
+          subscribedAt: { $gte: twelveMonthsAgo }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$subscribedAt' },
+            month: { $month: '$subscribedAt' }
+          },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { '_id.year': 1, '_id.month': 1 } }
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        overview: {
+          totalSubscriptions,
+          activeSubscriptions,
+          inactiveSubscriptions,
+          recentSubscriptions,
+          recentUnsubscriptions
+        },
+        topDomains: domainStats,
+        monthlyGrowth: monthlyGrowth.map(item => ({
+          month: `${item._id.year}-${String(item._id.month).padStart(2, '0')}`,
+          count: item.count
+        }))
+      }
+    });
+  })
+);
+
+// POST /api/newsletter/admin/export - Export subscriptions to CSV (Admin only)
+router.post(
+  '/admin/export',
+  [
+    body('format').optional().isIn(['csv', 'json']).withMessage('Format must be csv or json'),
+    body('status').optional().isIn(['active', 'inactive', 'all']).withMessage('Status must be active, inactive, or all'),
+    body('fields').optional().isArray().withMessage('Fields must be an array'),
+  ],
+  asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) throw validationErrorHandler(errors);
+
+    const { format = 'csv', status = 'all', fields } = req.body;
+
+    // Build query
+    const query = {};
+    if (status !== 'all') {
+      query.isActive = status === 'active';
+    }
+
+    // Get subscriptions
+    const subscriptions = await NewsletterSubscription.find(query).lean();
+
+    // Log export operation
+    logger.info(`Newsletter subscriptions exported by admin ${req.user.id}`, {
+      format,
+      status,
+      count: subscriptions.length
+    });
+
+    if (format === 'json') {
+      return res.json({
+        success: true,
+        data: { subscriptions }
+      });
+    }
+
+    // CSV format
+    const csvFields = fields || ['email', 'firstName', 'lastName', 'isActive', 'subscribedAt', 'unsubscribedAt'];
+    const csvHeader = csvFields.join(',');
+    
+    const csvRows = subscriptions.map(sub => {
+      return csvFields.map(field => {
+        let value = sub[field];
+        if (value instanceof Date) {
+          value = value.toISOString();
+        }
+        if (typeof value === 'string' && value.includes(',')) {
+          value = `"${value}"`;
+        }
+        return value || '';
+      }).join(',');
+    });
+
+    const csvContent = [csvHeader, ...csvRows].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=newsletter-subscriptions.csv');
+    res.send(csvContent);
   })
 );
 

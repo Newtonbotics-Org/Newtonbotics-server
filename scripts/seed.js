@@ -19,6 +19,7 @@ const ProjectRequest = require('../src/models/ProjectRequest');
 const RoleApproval = require('../src/models/RoleApproval');
 const NewsApplication = require('../src/models/NewsApplication');
 const ResearchArea = require('../src/models/ResearchArea');
+const NewsletterSubscription = require('../src/models/NewsletterSubscription');
 
 async function connect() {
   const uri = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/newtonbotics';
@@ -1221,6 +1222,29 @@ async function seedContactsAndMessages({ admin, users }) {
   }
 }
 
+async function seedNewsletter() {
+  const existing = await NewsletterSubscription.countDocuments();
+  if (existing > 0) {
+    console.log('Newsletter subscriptions already exist, skipping');
+    return;
+  }
+  const emails = [
+    'student@example.com',
+    'mentor@example.com',
+    'member@example.com',
+    'researcher@example.com'
+  ];
+  const docs = emails.map((email, idx) => ({
+    email,
+    name: email.split('@')[0],
+    source: 'seed',
+    isVerified: idx % 2 === 0,
+    subscribedAt: new Date(Date.now() - (idx + 1) * 86400000)
+  }));
+  await NewsletterSubscription.insertMany(docs);
+  console.log(`Seeded ${docs.length} newsletter subscriptions`);
+}
+
 async function seedProjectRequests({ submitter, mentor, team }) {
   const prCount = await ProjectRequest.countDocuments();
   if (prCount > 0) {
@@ -1678,6 +1702,7 @@ async function main() {
     await seedContactsAndMessages({ admin, users: [leader, member1, member2] });
     await seedProjectRequests({ submitter: leader, mentor, team: [member1, member2] });
     await seedResearchAreas({ createdBy: admin._id });
+    await seedNewsletter();
 
     console.log('Seeding complete.');
     await mongoose.disconnect();
