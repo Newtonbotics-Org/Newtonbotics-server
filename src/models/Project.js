@@ -324,6 +324,51 @@ const projectSchema = new mongoose.Schema({
       type: Date,
       default: Date.now
     }
+  }],
+  allTeamMembers: [{
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: [true, 'Team member user ID is required']
+    },
+    name: {
+      type: String,
+      required: [true, 'Team member name is required'],
+      trim: true,
+      maxlength: [200, 'Name cannot exceed 200 characters']
+    },
+    role: {
+      type: String,
+      required: [true, 'Team member role is required'],
+      trim: true,
+      maxlength: [100, 'Role cannot exceed 100 characters']
+    },
+    joinedAt: {
+      type: Date,
+      required: [true, 'Join date is required'],
+      default: Date.now
+    },
+    leftAt: {
+      type: Date,
+      validate: {
+        validator: function(value) {
+          if (value && value < this.joinedAt) {
+            return false;
+          }
+          return true;
+        },
+        message: 'Leave date cannot be before join date'
+      }
+    },
+    isActive: {
+      type: Boolean,
+      default: true
+    },
+    contribution: {
+      type: String,
+      trim: true,
+      maxlength: [1000, 'Contribution description cannot exceed 1000 characters']
+    }
   }]
 }, {
   timestamps: true,
@@ -376,6 +421,8 @@ projectSchema.index({ createdAt: 1 });
 projectSchema.index({ isPublic: 1 });
 projectSchema.index({ isFeatured: 1 });
 projectSchema.index({ 'teamMembers.userId': 1 });
+projectSchema.index({ 'allTeamMembers.userId': 1 });
+projectSchema.index({ 'allTeamMembers.isActive': 1 });
 projectSchema.index({ 'milestones.status': 1 });
 projectSchema.index({ 'milestones.dueDate': 1 });
 projectSchema.index({ tags: 1 });
@@ -440,12 +487,23 @@ projectSchema.methods.addTeamMember = async function(userId, role, skills = [], 
     throw new Error('User is already a team member');
   }
   
+  // Add to current team members
   this.teamMembers.push({
     userId,
     role,
     skills,
     responsibilities,
     joinedAt: new Date()
+  });
+  
+  // Add to all team members history
+  const memberName = `${user.firstName} ${user.lastName}`.trim();
+  this.allTeamMembers.push({
+    userId,
+    name: memberName,
+    role,
+    joinedAt: new Date(),
+    isActive: true
   });
   
   await this.save();
@@ -467,7 +525,19 @@ projectSchema.methods.removeTeamMember = async function(userId) {
     throw new Error('Cannot remove team leader');
   }
   
+  // Remove from current team members
   this.teamMembers.splice(memberIndex, 1);
+  
+  // Mark as inactive in all team members history
+  const allMemberIndex = this.allTeamMembers.findIndex(member => 
+    member.userId.toString() === userId.toString() && member.isActive
+  );
+  
+  if (allMemberIndex !== -1) {
+    this.allTeamMembers[allMemberIndex].isActive = false;
+    this.allTeamMembers[allMemberIndex].leftAt = new Date();
+  }
+  
   await this.save();
   return this;
 };
@@ -501,6 +571,53 @@ projectSchema.methods.updateMilestoneStatus = function(milestoneId, status, comp
   return this;
 };
 
+// Instance method to get all team members (active and inactive)
+projectSchema.methods.getAllTeamMembers = function() {
+  return this.allTeamMembers.sort((a, b) => new Date(b.joinedAt) - new Date(a.joinedAt));
+};
+
+// Instance method to get active team members only
+projectSchema.methods.getActiveTeamMembers = function() {
+  return this.allTeamMembers.filter(member => member.isActive);
+};
+
+// Instance method to get former team members
+projectSchema.methods.getFormerTeamMembers = function() {
+  return this.allTeamMembers.filter(member => !member.isActive);
+};
+
+// Instance method to add team member to historical record (for existing members or team leaders)
+projectSchema.methods.addToAllTeamMembers = async function(userId, role, contribution = '') {
+  const User = mongoose.model('User');
+  const user = await User.findById(userId);
+  
+  if (!user) {
+    throw new Error('User not found');
+  }
+  
+  // Check if user is already in all team members
+  const existingMember = this.allTeamMembers.find(member => 
+    member.userId.toString() === userId.toString()
+  );
+  
+  if (existingMember) {
+    throw new Error('User is already in the team members history');
+  }
+  
+  const memberName = `${user.firstName} ${user.lastName}`.trim();
+  this.allTeamMembers.push({
+    userId,
+    name: memberName,
+    role,
+    joinedAt: new Date(),
+    isActive: true,
+    contribution
+  });
+  
+  await this.save();
+  return this;
+};
+
 // Instance method to calculate project statistics
 projectSchema.methods.getStatistics = function() {
   const stats = {
@@ -508,6 +625,9 @@ projectSchema.methods.getStatistics = function() {
     completedMilestones: this.milestones.filter(m => m.status === 'completed').length,
     overdueMilestones: this.milestones.filter(m => m.status === 'overdue').length,
     teamSize: this.teamMembers.length + 1, // +1 for team leader
+    totalTeamMembersEver: this.allTeamMembers.length + 1, // +1 for team leader
+    activeTeamMembers: this.allTeamMembers.filter(m => m.isActive).length + 1, // +1 for team leader
+    formerTeamMembers: this.allTeamMembers.filter(m => !m.isActive).length,
     progress: this.progress,
     isOverdue: this.isOverdue,
     duration: this.duration

@@ -43,6 +43,52 @@ router.get(
   })
 );
 
+// GET /api/media/:id - Get media file details (public)
+router.get(
+  '/:id',
+  optionalAuth,
+  [param('id').isString()],
+  asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) throw validationErrorHandler(errors);
+    
+    const item = await Media.findById(req.params.id);
+    if (!item) throw notFoundErrorHandler('Media');
+    
+    // Increment view count (best-effort, non-blocking)
+    Media.findByIdAndUpdate(item._id, { $inc: { viewCount: 1 } }).catch(() => {});
+    
+    res.json({ success: true, data: { item } });
+  })
+);
+
+// POST /api/media/:id/view - Increment view count (public)
+router.post(
+  '/:id/view',
+  optionalAuth,
+  [param('id').isString()],
+  asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) throw validationErrorHandler(errors);
+    
+    const item = await Media.findById(req.params.id);
+    if (!item) throw notFoundErrorHandler('Media');
+    
+    // Increment view count
+    const updated = await Media.findByIdAndUpdate(
+      item._id, 
+      { $inc: { viewCount: 1 } }, 
+      { new: true, select: 'viewCount' }
+    );
+    
+    res.json({ 
+      success: true, 
+      message: 'View count updated', 
+      data: { viewCount: updated.viewCount } 
+    });
+  })
+);
+
 router.post(
   '/',
   verifyToken,
