@@ -76,14 +76,27 @@ router.post(
     body('isFeatured').optional().isBoolean().toBoolean(),
     body('requiresRegistration').optional().isBoolean().toBoolean(),
     body('registrationFormLink').optional().isString().isLength({ max: 500 }),
-    body('registrationDeadline').optional().isISO8601().withMessage('Registration deadline must be a valid ISO8601 date'),
+    body('registrationDeadline').optional({ checkFalsy: true }).isISO8601().withMessage('Registration deadline must be a valid ISO8601 date'),
     body('featureOptions.showInNav').optional().isBoolean().toBoolean(),
-    body('featureOptions.navLabel').optional().isString().isLength({ min: 2, max: 50 }),
+    body('featureOptions.navLabel').optional({ checkFalsy: true }).isString().isLength({ min: 2, max: 50 }),
     body('featureOptions.navOrder').optional().isInt({ min: 0 }).toInt(),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) throw validationErrorHandler(errors);
+    
+    // Ensure endDate is not before startDate (same day allowed)
+    const { startDate, endDate } = req.body;
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      if (end < start) {
+        return res.status(400).json({
+          success: false,
+          message: 'End date must be the same as or after start date'
+        });
+      }
+    }
     
     // Validate registration form link if registration is required
     if (req.body.requiresRegistration && !req.body.registrationFormLink) {
@@ -110,13 +123,25 @@ router.put('/:id', verifyToken, requireMentor, [
   param('id').isString(),
   body('requiresRegistration').optional().isBoolean().toBoolean(),
   body('registrationFormLink').optional().isString().isLength({ max: 500 }),
-  body('registrationDeadline').optional().isISO8601().withMessage('Registration deadline must be a valid ISO8601 date'),
+  body('registrationDeadline').optional({ checkFalsy: true }).isISO8601().withMessage('Registration deadline must be a valid ISO8601 date'),
   body('featureOptions.showInNav').optional().isBoolean().toBoolean(),
-  body('featureOptions.navLabel').optional().isString().isLength({ min: 2, max: 50 }),
+  body('featureOptions.navLabel').optional({ checkFalsy: true }).isString().isLength({ min: 2, max: 50 }),
   body('featureOptions.navOrder').optional().isInt({ min: 0 }).toInt(),
 ], asyncHandler(async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) throw validationErrorHandler(errors);
+  
+  // For partial updates, ensure endDate is not before startDate (same day allowed)
+  const existing = await Event.findById(req.params.id);
+  if (!existing) throw notFoundErrorHandler('Event');
+  const nextStart = req.body.startDate ? new Date(req.body.startDate) : new Date(existing.startDate);
+  const nextEnd = req.body.endDate ? new Date(req.body.endDate) : new Date(existing.endDate);
+  if (nextEnd < nextStart) {
+    return res.status(400).json({
+      success: false,
+      message: 'End date must be the same as or after start date'
+    });
+  }
   
   // Validate registration form link if registration is required
   if (req.body.requiresRegistration && !req.body.registrationFormLink) {

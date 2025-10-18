@@ -164,8 +164,8 @@ const requireAdmin = requireRole('admin');
 // Mentor or higher access
 const requireMentor = requireRole('mentor', 'researcher', 'admin');
 
-// Team member or higher access
-const requireTeamMember = requireRole('team_member', 'mentor', 'researcher', 'admin');
+// Team member or higher access (including students)
+const requireTeamMember = requireRole('student', 'team_member', 'mentor', 'researcher', 'admin');
 
 // Student or higher access
 const requireStudent = requireRole('student', 'team_member', 'mentor', 'researcher', 'admin');

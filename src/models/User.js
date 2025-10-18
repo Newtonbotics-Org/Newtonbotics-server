@@ -334,8 +334,8 @@ userSchema.methods.generateRefreshToken = function() {
 // Instance method to get default permissions based on role
 userSchema.methods.getDefaultPermissions = function() {
   const rolePermissions = {
-    student: ['read:projects', 'read:workshops', 'read:events', 'read:inventory', 'read:news', 'read:media'],
-    team_member: ['read:projects', 'write:projects', 'read:workshops', 'read:events', 'read:inventory', 'read:news', 'read:media'],
+    student: ['read:projects', 'write:projects', 'read:workshops', 'read:events', 'read:inventory', 'read:news', 'read:media', 'write:requests'],
+    team_member: ['read:projects', 'write:projects', 'read:workshops', 'read:events', 'read:inventory', 'read:news', 'read:media', 'write:requests'],
     mentor: ['read:projects', 'write:projects', 'delete:projects', 'read:workshops', 'write:workshops', 'read:events', 'write:events', 'read:inventory', 'write:inventory', 'read:requests', 'approve:requests', 'read:news', 'write:news', 'read:media', 'write:media'],
     researcher: ['read:projects', 'write:projects', 'delete:projects', 'read:workshops', 'write:workshops', 'delete:workshops', 'read:events', 'write:events', 'delete:events', 'read:inventory', 'write:inventory', 'delete:inventory', 'read:requests', 'write:requests', 'approve:requests', 'read:news', 'write:news', 'delete:news', 'read:media', 'write:media', 'delete:media'],
     community: ['read:projects', 'read:workshops', 'read:events', 'read:news', 'read:media'],

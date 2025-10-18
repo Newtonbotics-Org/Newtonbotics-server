@@ -81,12 +81,18 @@ router.post(
     body('application.requireLogin').optional().isBoolean(),
     body('application.formApplyStartDate').optional().isISO8601(),
     body('application.formApplyLastDate').optional().isISO8601(),
+    body('application.formApplyEndDate').optional().isISO8601(),
     body('application.maxApplicants').optional().isInt({ min: 1 }),
     body('application.formLink').optional().isString().isLength({ max: 500 }),
     body('application.targetType').optional().isIn(['Workshop', 'Event', 'Competition', 'Other']),
     body('application.targetId').optional().isString(),
   ],
   asyncHandler(async (req, res) => {
+    // Handle formApplyEndDate as alias for formApplyLastDate
+    if (req.body.application && req.body.application.formApplyEndDate && !req.body.application.formApplyLastDate) {
+      req.body.application.formApplyLastDate = req.body.application.formApplyEndDate;
+      delete req.body.application.formApplyEndDate;
+    }
     const errors = validationResult(req);
     if (!errors.isEmpty()) throw validationErrorHandler(errors);
     
@@ -302,12 +308,18 @@ router.put(
     body('application.requireLogin').optional().isBoolean(),
     body('application.formApplyStartDate').optional().isISO8601(),
     body('application.formApplyLastDate').optional().isISO8601(),
+    body('application.formApplyEndDate').optional().isISO8601(),
     body('application.maxApplicants').optional().isInt({ min: 1 }),
     body('application.formLink').optional().isString().isLength({ max: 500 }),
     body('application.targetType').optional().isIn(['Workshop', 'Event', 'Competition', 'Other']),
     body('application.targetId').optional().isString(),
   ],
   asyncHandler(async (req, res) => {
+    // Handle formApplyEndDate as alias for formApplyLastDate
+    if (req.body.application && req.body.application.formApplyEndDate && !req.body.application.formApplyLastDate) {
+      req.body.application.formApplyLastDate = req.body.application.formApplyEndDate;
+      delete req.body.application.formApplyEndDate;
+    }
     const errors = validationResult(req);
     if (!errors.isEmpty()) throw validationErrorHandler(errors);
     

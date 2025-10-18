@@ -99,7 +99,6 @@ router.get(
 router.post(
   '/',
   verifyToken,
-  requireTeamMember,
   [
     body('title').isString().isLength({ min: 5, max: 255 }),
     body('description').isString().isLength({ min: 20, max: 5000 }),
@@ -220,9 +219,128 @@ router.delete(
     const { id } = req.params;
     const objId = ensureObjectId(id);
     if (!objId) throw notFoundErrorHandler('Project');
+    
+    // First check if project exists
+    const project = await Project.findById(objId);
+    if (!project) throw notFoundErrorHandler('Project');
+    
+    // Log the deletion for audit purposes
+    logger.info(`Project deleted by admin/mentor`, {
+      projectId: id,
+      projectTitle: project.title,
+      deletedBy: req.user.id,
+      deletedByEmail: req.user.email,
+      deletedAt: new Date().toISOString()
+    });
+    
     const deleted = await Project.findByIdAndDelete(objId);
-    if (!deleted) throw notFoundErrorHandler('Project');
-    res.json({ success: true, message: 'Project deleted' });
+    if (!deleted) {
+      // This should not happen since we already checked project existence above
+      logger.error(`Project deletion failed - project not found during deletion`, {
+        projectId: id,
+        deletedBy: req.user.id,
+        deletedByEmail: req.user.email
+      });
+      throw notFoundErrorHandler('Project');
+    }
+    
+    res.json({ 
+      success: true, 
+      message: 'Project deleted successfully',
+      data: {
+        deletedProject: {
+          id: deleted._id,
+          title: deleted.title,
+          deletedAt: new Date().toISOString()
+        }
+      }
+    });
+  })
+);
+
+// DELETE /api/projects/:id/self - delete own project (team leader only)
+router.delete(
+  '/:id/self',
+  verifyToken,
+  [param('id').isString()],
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const objId = ensureObjectId(id);
+    if (!objId) throw notFoundErrorHandler('Project');
+    
+    const project = await Project.findById(objId);
+    if (!project) throw notFoundErrorHandler('Project');
+    
+    // Check if user is the team leader of this project
+    if (project.teamLeaderId?.toString() !== req.user.id) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          message: 'Access denied. You can only delete projects where you are the team leader.',
+          details: {
+            statusCode: 403,
+            isOperational: true,
+            message: 'Access denied. You can only delete projects where you are the team leader.'
+          }
+        },
+        timestamp: new Date().toISOString(),
+        path: `/api/projects/${id}/self`,
+        method: 'DELETE'
+      });
+    }
+    
+    // Additional safety check: prevent deletion of projects with active team members
+    const activeMembers = project.teamMembers.filter(member => member.isActive);
+    if (activeMembers.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'Cannot delete project with active team members. Please remove all team members first or transfer leadership.',
+          details: {
+            statusCode: 400,
+            isOperational: true,
+            message: 'Cannot delete project with active team members. Please remove all team members first or transfer leadership.',
+            activeMembersCount: activeMembers.length
+          }
+        },
+        timestamp: new Date().toISOString(),
+        path: `/api/projects/${id}/self`,
+        method: 'DELETE'
+      });
+    }
+    
+    // Log the deletion for audit purposes
+    logger.info(`Project deleted by team leader`, {
+      projectId: id,
+      projectTitle: project.title,
+      teamLeaderId: req.user.id,
+      teamLeaderEmail: req.user.email,
+      deletedAt: new Date().toISOString()
+    });
+    
+    const deleted = await Project.findByIdAndDelete(objId);
+    if (!deleted) {
+      // This should not happen since we already checked project existence above
+      // But let's handle it gracefully
+      logger.error(`Project deletion failed - project not found during deletion`, {
+        projectId: id,
+        teamLeaderId: req.user.id,
+        teamLeaderEmail: req.user.email
+      });
+      throw notFoundErrorHandler('Project');
+    }
+    
+    res.json({ 
+      success: true, 
+      message: 'Project deleted successfully',
+      data: {
+        deletedProject: {
+          id: deleted._id,
+          title: deleted.title,
+          deletedAt: new Date().toISOString()
+        }
+      }
+    });
   })
 );
 
