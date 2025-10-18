@@ -130,8 +130,8 @@ async function seedProjects({ mentor, teamLeader, members }) {
       { title: 'SLAM Tuning', description: 'Tune SLAM parameters', dueDate: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000), status: 'in_progress' },
     ],
     teamMembers: [
-      { userId: members[0]._id, role: 'Developer', skills: ['C++', 'ROS2'] },
-      { userId: members[1]._id, role: 'Hardware', skills: ['Electronics'] },
+      { userId: members[0]._id, userName: `${members[0].firstName} ${members[0].lastName}`.trim(), role: 'Developer', skills: ['C++', 'ROS2'] },
+      { userId: members[1]._id, userName: `${members[1].firstName} ${members[1].lastName}`.trim(), role: 'Hardware', skills: ['Electronics'] },
     ],
   }));
 
@@ -152,7 +152,7 @@ async function seedProjects({ mentor, teamLeader, members }) {
       { title: 'CAD Design', description: 'Design arm in CAD', dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000) },
     ],
     teamMembers: [
-      { userId: members[0]._id, role: 'Designer' },
+      { userId: members[0]._id, userName: `${members[0].firstName} ${members[0].lastName}`.trim(), role: 'Designer' },
     ],
   }));
 
@@ -180,7 +180,7 @@ async function seedProjects({ mentor, teamLeader, members }) {
       { title: 'Edge Optimization', dueDate: edgeOptDue, status: 'completed', completedAt: edgeOptDue },
     ],
     teamMembers: [
-      { userId: members[1]._id, role: 'ML Engineer', skills: ['Python', 'TensorRT'] },
+      { userId: members[1]._id, userName: `${members[1].firstName} ${members[1].lastName}`.trim(), role: 'ML Engineer', skills: ['Python', 'TensorRT'] },
     ],
   }));
 
@@ -204,8 +204,8 @@ async function seedProjects({ mentor, teamLeader, members }) {
       { title: 'App Development', description: 'Develop mobile control app', dueDate: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000), status: 'pending' },
     ],
     teamMembers: [
-      { userId: members[0]._id, role: 'IoT Developer', skills: ['Arduino', 'ESP32'] },
-      { userId: members[1]._id, role: 'App Developer', skills: ['React Native', 'Firebase'] },
+      { userId: members[0]._id, userName: `${members[0].firstName} ${members[0].lastName}`.trim(), role: 'IoT Developer', skills: ['Arduino', 'ESP32'] },
+      { userId: members[1]._id, userName: `${members[1].firstName} ${members[1].lastName}`.trim(), role: 'App Developer', skills: ['React Native', 'Firebase'] },
     ],
   }));
 
@@ -228,8 +228,8 @@ async function seedProjects({ mentor, teamLeader, members }) {
       { title: 'Vision System', description: 'Implement object detection', dueDate: new Date(Date.now() + 40 * 24 * 60 * 60 * 1000), status: 'pending' },
     ],
     teamMembers: [
-      { userId: members[0]._id, role: 'Drone Engineer', skills: ['Flight Control', 'PID Tuning'] },
-      { userId: members[1]._id, role: 'Computer Vision Engineer', skills: ['OpenCV', 'YOLO'] },
+      { userId: members[0]._id, userName: `${members[0].firstName} ${members[0].lastName}`.trim(), role: 'Drone Engineer', skills: ['Flight Control', 'PID Tuning'] },
+      { userId: members[1]._id, userName: `${members[1].firstName} ${members[1].lastName}`.trim(), role: 'Computer Vision Engineer', skills: ['OpenCV', 'YOLO'] },
     ],
   }));
 
@@ -254,8 +254,8 @@ async function seedProjects({ mentor, teamLeader, members }) {
       { title: 'Hardware Integration', dueDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), status: 'completed', completedAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
     ],
     teamMembers: [
-      { userId: members[0]._id, role: 'Algorithm Developer', skills: ['Python', 'OpenCV'] },
-      { userId: members[1]._id, role: 'Hardware Engineer', skills: ['Arduino', 'Sensors'] },
+      { userId: members[0]._id, userName: `${members[0].firstName} ${members[0].lastName}`.trim(), role: 'Algorithm Developer', skills: ['Python', 'OpenCV'] },
+      { userId: members[1]._id, userName: `${members[1].firstName} ${members[1].lastName}`.trim(), role: 'Hardware Engineer', skills: ['Arduino', 'Sensors'] },
     ],
   }));
 

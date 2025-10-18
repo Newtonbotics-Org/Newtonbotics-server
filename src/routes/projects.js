@@ -110,6 +110,11 @@ router.post(
     body('budget').optional().isFloat({ min: 0 }),
     body('mentorId').optional().isString(),
     body('teamLeaderId').isString(),
+    body('teamMembers').optional().isArray(),
+    body('teamMembers.*.userId').optional().isString(),
+    body('teamMembers.*.role').optional().isString().isLength({ min: 2, max: 100 }),
+    body('teamMembers.*.skills').optional().isArray(),
+    body('teamMembers.*.responsibilities').optional().isArray(),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -125,6 +130,7 @@ router.post(
       budget,
       mentorId,
       teamLeaderId,
+      teamMembers = [],
       imageUrl,
       videoUrl,
       githubUrl,
@@ -151,9 +157,37 @@ router.post(
       tags,
     });
 
+    // Add team members if provided
+    if (teamMembers && teamMembers.length > 0) {
+      const User = require('../models/User');
+      for (const member of teamMembers) {
+        const memberUserId = ensureObjectId(member.userId);
+        if (memberUserId) {
+          try {
+            const user = await User.findById(memberUserId);
+            if (user && user.isActive) {
+              const memberName = `${user.firstName} ${user.lastName}`.trim();
+              newProject.teamMembers.push({
+                userId: memberUserId,
+                userName: memberName,
+                role: member.role || 'Member',
+                skills: member.skills || [],
+                responsibilities: member.responsibilities || [],
+                joinedAt: new Date()
+              });
+            }
+          } catch (error) {
+            logger.warn(`Failed to add team member ${member.userId}: ${error.message}`);
+          }
+        }
+      }
+      await newProject.save();
+    }
+
     const populated = await Project.findById(newProject._id)
       .populate('mentorId', 'firstName lastName email role')
-      .populate('teamLeaderId', 'firstName lastName email role');
+      .populate('teamLeaderId', 'firstName lastName email role')
+      .populate('teamMembers.userId', 'firstName lastName email role profileImageUrl');
 
     // Notify mentor and team leader if emails exist
     const recipients = [populated?.mentorId?.email, populated?.teamLeaderId?.email].filter(Boolean);
