@@ -142,6 +142,12 @@ const projectSchema = new mongoose.Schema({
         message: 'Team member must be an active user'
       }
     },
+    userName: {
+      type: String,
+      required: [true, 'Team member name is required'],
+      trim: true,
+      maxlength: [200, 'Name cannot exceed 200 characters']
+    },
     role: {
       type: String,
       required: [true, 'Team member role is required'],
@@ -488,8 +494,10 @@ projectSchema.methods.addTeamMember = async function(userId, role, skills = [], 
   }
   
   // Add to current team members
+  const memberName = `${user.firstName} ${user.lastName}`.trim();
   this.teamMembers.push({
     userId,
+    userName: memberName,
     role,
     skills,
     responsibilities,
@@ -497,7 +505,6 @@ projectSchema.methods.addTeamMember = async function(userId, role, skills = [], 
   });
   
   // Add to all team members history
-  const memberName = `${user.firstName} ${user.lastName}`.trim();
   this.allTeamMembers.push({
     userId,
     name: memberName,

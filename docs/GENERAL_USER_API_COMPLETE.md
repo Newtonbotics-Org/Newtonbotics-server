@@ -1552,3 +1552,4 @@ GET /api/public/people?role=mentor&limit=10
 8. **CORS**: Frontend applications need to handle CORS for cross-origin requests
 
 This documentation covers all the essential APIs that your frontend will need to interact with the Newton Robotics Server backend! 🚀
+
