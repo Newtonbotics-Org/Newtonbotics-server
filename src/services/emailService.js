@@ -185,4 +185,177 @@ async function sendProjectRequestStatusEmail({ request, newStatus, recipientEmai
 module.exports.sendProjectStatusChangedEmail = sendProjectStatusChangedEmail;
 module.exports.sendProjectRequestStatusEmail = sendProjectRequestStatusEmail;
 
+// Newsletter campaign sending
+async function sendNewsletterCampaign({ campaign, recipients, isTest = false }) {
+  if (!campaign || !recipients || recipients.length === 0) {
+    throw new Error('Campaign and recipients are required');
+  }
+
+  const results = {
+    sent: 0,
+    failed: 0,
+    errors: []
+  };
+
+  // Process recipients in batches to avoid overwhelming the email service
+  const batchSize = 10;
+  const batches = [];
+  
+  for (let i = 0; i < recipients.length; i += batchSize) {
+    batches.push(recipients.slice(i, i + batchSize));
+  }
+
+  for (const batch of batches) {
+    const batchPromises = batch.map(async (recipient) => {
+      try {
+        // Personalize content if needed
+        let personalizedContent = campaign.content;
+        let personalizedSubject = campaign.subject;
+        
+        if (recipient.firstName) {
+          personalizedContent = personalizedContent.replace(/{{firstName}}/g, recipient.firstName);
+          personalizedSubject = personalizedSubject.replace(/{{firstName}}/g, recipient.firstName);
+        }
+        
+        if (recipient.lastName) {
+          personalizedContent = personalizedContent.replace(/{{lastName}}/g, recipient.lastName);
+          personalizedSubject = personalizedSubject.replace(/{{lastName}}/g, recipient.lastName);
+        }
+
+        // Add unsubscribe link
+        const unsubscribeLink = `${baseUrl}/newsletter/unsubscribe?email=${encodeURIComponent(recipient.email)}`;
+        personalizedContent += `<br><br><hr><p style="font-size:12px; color:#666;"><a href="${unsubscribeLink}">Unsubscribe from this newsletter</a></p>`;
+
+        const html = buildNewsletterHtml(campaign.title, personalizedContent, campaign.template);
+        const text = stripHtml(personalizedContent);
+
+        await sendEmail({
+          to: recipient.email,
+          subject: isTest ? `[TEST] ${personalizedSubject}` : personalizedSubject,
+          html,
+          text
+        });
+
+        results.sent++;
+        logger.info(`Newsletter sent to ${recipient.email}`, { campaignId: campaign._id, isTest });
+      } catch (error) {
+        results.failed++;
+        results.errors.push({ email: recipient.email, error: error.message });
+        logger.error(`Failed to send newsletter to ${recipient.email}`, { 
+          campaignId: campaign._id, 
+          error: error.message,
+          isTest 
+        });
+      }
+    });
+
+    // Wait for batch to complete before processing next batch
+    await Promise.all(batchPromises);
+    
+    // Small delay between batches to be respectful to email service
+    if (batches.indexOf(batch) < batches.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+  }
+
+  return results;
+}
+
+function buildNewsletterHtml(title, content, template = 'default') {
+  const baseStyles = `
+    <style>
+      body { font-family: Inter, Arial, sans-serif; line-height: 1.6; color: #374151; margin: 0; padding: 0; }
+      .container { max-width: 640px; margin: 0 auto; padding: 20px; }
+      .header { background: #111827; color: white; padding: 20px; text-align: center; }
+      .content { padding: 20px; background: white; }
+      .footer { background: #f9fafb; padding: 15px; text-align: center; font-size: 12px; color: #6b7280; }
+      .unsubscribe { margin-top: 20px; padding-top: 20px; border-top: 1px solid #e5e7eb; }
+      .unsubscribe a { color: #6b7280; text-decoration: none; }
+      .unsubscribe a:hover { text-decoration: underline; }
+    </style>
+  `;
+
+  const templateStyles = {
+    news: `
+      <style>
+        .news-header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .news-title { font-size: 28px; font-weight: bold; margin-bottom: 10px; }
+        .news-meta { font-size: 14px; opacity: 0.9; }
+      </style>
+    `,
+    announcement: `
+      <style>
+        .announcement-header { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
+        .announcement-title { font-size: 32px; font-weight: bold; text-transform: uppercase; }
+      </style>
+    `,
+    event: `
+      <style>
+        .event-header { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
+        .event-title { font-size: 30px; font-weight: bold; }
+        .event-highlight { background: #fef3c7; padding: 15px; border-left: 4px solid #f59e0b; margin: 20px 0; }
+      </style>
+    `,
+    default: ''
+  };
+
+  const headerClass = template === 'default' ? 'header' : `${template}-header`;
+  const titleClass = template === 'default' ? '' : `${template}-title`;
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>${title}</title>
+      ${baseStyles}
+      ${templateStyles[template] || templateStyles.default}
+    </head>
+    <body>
+      <div class="container">
+        <div class="${headerClass}">
+          <h1 class="${titleClass}">${title}</h1>
+          <div class="news-meta">NewtonBotics Newsletter</div>
+        </div>
+        <div class="content">
+          ${content}
+        </div>
+        <div class="footer">
+          <p>This newsletter was sent by NewtonBotics</p>
+          <div class="unsubscribe">
+            <a href="{{unsubscribeLink}}">Unsubscribe from this newsletter</a>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+}
+
+function stripHtml(html) {
+  return html
+    .replace(/<[^>]*>/g, '') // Remove HTML tags
+    .replace(/&nbsp;/g, ' ') // Replace &nbsp; with space
+    .replace(/&amp;/g, '&') // Replace &amp; with &
+    .replace(/&lt;/g, '<') // Replace &lt; with <
+    .replace(/&gt;/g, '>') // Replace &gt; with >
+    .replace(/&quot;/g, '"') // Replace &quot; with "
+    .replace(/&#39;/g, "'") // Replace &#39; with '
+    .trim();
+}
+
+// Test newsletter sending
+async function sendTestNewsletter({ campaign, testEmails }) {
+  if (!campaign || !testEmails || testEmails.length === 0) {
+    throw new Error('Campaign and test emails are required');
+  }
+
+  const testRecipients = testEmails.map(email => ({ email }));
+  return await sendNewsletterCampaign({ campaign, recipients: testRecipients, isTest: true });
+}
+
+module.exports.sendNewsletterCampaign = sendNewsletterCampaign;
+module.exports.sendTestNewsletter = sendTestNewsletter;
+
 

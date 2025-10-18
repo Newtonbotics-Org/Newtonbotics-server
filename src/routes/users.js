@@ -592,6 +592,85 @@ router.get('/roles', asyncHandler(async (req, res) => {
   });
 }));
 
+// @route   GET /api/users/club-members
+// @desc    Get all club members (team_member, mentor, researcher, admin, community - excluding students)
+// @access  Private
+router.get('/club-members', asyncHandler(async (req, res) => {
+  const { q, department, skills, limit = 50, skip = 0 } = req.query;
+
+  // Build search query to exclude students
+  const searchQuery = { 
+    isActive: true,
+    role: { $in: ['team_member', 'mentor', 'researcher', 'admin', 'community'] }
+  };
+  
+  if (q) {
+    searchQuery.$text = { $search: q };
+  }
+  
+  if (department) {
+    searchQuery.department = department;
+  }
+  
+  if (skills && skills.length > 0) {
+    searchQuery.skills = { $in: skills };
+  }
+
+  // Execute search with club member roles only
+  const users = await User.find(searchQuery)
+    .select('-passwordHash')
+    .limit(parseInt(limit))
+    .skip(parseInt(skip))
+    .sort({ role: 1, firstName: 1, lastName: 1 });
+
+  const total = await User.countDocuments(searchQuery);
+
+  // Log search operation
+  logger.info(`Club members search performed by ${req.user.id}`, {
+    query: q,
+    filters: { department, skills },
+    results: users.length,
+    total
+  });
+
+  res.json({
+    success: true,
+    data: {
+      clubMembers: users.map(user => ({
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        fullName: user.fullName,
+        displayName: user.displayName,
+        role: user.role,
+        subroles: user.subroles || [],
+        specialization: user.specialization,
+        experienceYears: user.experienceYears,
+        department: user.department,
+        yearOfStudy: user.yearOfStudy,
+        phone: user.phone,
+        profileImageUrl: user.profileImageUrl,
+        bio: user.bio,
+        skills: user.skills || [],
+        achievements: user.achievements || [],
+        socialLinks: user.socialLinks || {},
+        currentProjects: user.currentProjects || [],
+        emailVerified: user.emailVerified,
+        lastLogin: user.lastLogin,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      })),
+      pagination: {
+        total,
+        limit: parseInt(limit),
+        skip: parseInt(skip),
+        hasMore: total > parseInt(skip) + users.length
+      }
+    }
+  });
+}));
+
 module.exports = router;
 
 // Dashboard helpers and routes

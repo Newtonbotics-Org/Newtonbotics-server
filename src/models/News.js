@@ -68,8 +68,11 @@ newsSchema.pre('save', function(next) {
 
 // Pre-find middleware to update status for existing documents
 newsSchema.pre('find', function() {
-  this.updateMany(
-    { 
+  // IMPORTANT: Do not mutate the active find query here. Using this.updateMany()
+  // would turn this operation into an update and yield no documents.
+  // Instead, trigger a background model-level update to refresh statuses.
+  this.model.updateMany(
+    {
       'application.isEnabled': true,
       'application.formApplyStartDate': { $exists: true },
       'application.formApplyLastDate': { $exists: true }
@@ -93,7 +96,7 @@ newsSchema.pre('find', function() {
         }
       }
     ]
-  );
+  ).catch(() => {});
 });
 
 module.exports = mongoose.model('News', newsSchema);

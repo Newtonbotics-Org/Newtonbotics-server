@@ -3,6 +3,7 @@ const { body, param, query, validationResult } = require('express-validator');
 const router = express.Router();
 const { optionalAuth, verifyToken, requireTeamMember, requireMentor, requireAdmin } = require('../middleware/auth');
 const Event = require('../models/Event');
+const News = require('../models/News');
 const { asyncHandler, validationErrorHandler, notFoundErrorHandler } = require('../middleware/errorHandler');
 
 // TODO: Implement events routes
@@ -13,6 +14,126 @@ const { asyncHandler, validationErrorHandler, notFoundErrorHandler } = require('
 // - DELETE /api/events/:id - Delete event
 // - POST /api/events/:id/register - Register for event
 // - DELETE /api/events/:id/register - Unregister from event
+
+// Navigation API - Get all events and news with showInNav: true
+router.get(
+  '/navigation',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    try {
+      // Get events with showInNav: true
+      const events = await Event.find({ 'featureOptions.showInNav': true })
+        .select('_id title description category type startDate endDate location maxCapacity currentRegistrations registrationDeadline isFeatured imageUrl organizerId status requiresRegistration registrationFormLink featureOptions registrations createdAt updatedAt')
+        .populate('organizerId', 'name email')
+        .sort({ 'featureOptions.navOrder': 1, createdAt: -1 });
+
+      // Get news with showInNav: true
+      const news = await News.find({ 'featureOptions.showInNav': true })
+        .select('_id title content excerpt categoryId authorId featuredImageUrl tags isFeatured isPublished publishedAt viewCount featureOptions application createdAt updatedAt')
+        .populate('categoryId', 'name')
+        .populate('authorId', 'name email')
+        .sort({ 'featureOptions.navOrder': 1, createdAt: -1 });
+
+      // Format events for navigation
+      const formattedEvents = events.map(event => ({
+        id: event._id,
+        type: 'event',
+        title: event.title,
+        description: event.description,
+        category: event.category,
+        eventType: event.type, // 'workshop', 'seminar', 'exhibition', etc.
+        startDate: event.startDate,
+        endDate: event.endDate,
+        location: event.location,
+        maxCapacity: event.maxCapacity,
+        currentRegistrations: event.currentRegistrations,
+        registrationDeadline: event.registrationDeadline,
+        isFeatured: event.isFeatured,
+        imageUrl: event.imageUrl,
+        organizer: event.organizerId ? {
+          id: event.organizerId._id,
+          name: event.organizerId.name,
+          email: event.organizerId.email
+        } : null,
+        status: event.status, // 'upcoming', 'ongoing', 'completed', 'cancelled'
+        requiresRegistration: event.requiresRegistration,
+        registrationFormLink: event.registrationFormLink,
+        featureOptions: event.featureOptions,
+        registrations: event.registrations.map(reg => ({
+          userId: reg.userId,
+          registrationDate: reg.registrationDate,
+          attendanceStatus: reg.attendanceStatus
+        })),
+        createdAt: event.createdAt,
+        updatedAt: event.updatedAt
+      }));
+
+      // Format news for navigation
+      const formattedNews = news.map(newsItem => ({
+        id: newsItem._id,
+        type: 'news',
+        title: newsItem.title,
+        content: newsItem.content,
+        excerpt: newsItem.excerpt,
+        category: newsItem.categoryId ? {
+          id: newsItem.categoryId._id,
+          name: newsItem.categoryId.name
+        } : null,
+        author: newsItem.authorId ? {
+          id: newsItem.authorId._id,
+          name: newsItem.authorId.name,
+          email: newsItem.authorId.email
+        } : null,
+        featuredImageUrl: newsItem.featuredImageUrl,
+        tags: newsItem.tags,
+        isFeatured: newsItem.isFeatured,
+        isPublished: newsItem.isPublished,
+        publishedAt: newsItem.publishedAt,
+        viewCount: newsItem.viewCount,
+        featureOptions: newsItem.featureOptions,
+        application: newsItem.application ? {
+          isEnabled: newsItem.application.isEnabled,
+          type: newsItem.application.type, // 'workshop', 'event', 'competition', 'other'
+          requireLogin: newsItem.application.requireLogin,
+          formApplyStartDate: newsItem.application.formApplyStartDate,
+          formApplyLastDate: newsItem.application.formApplyLastDate,
+          maxApplicants: newsItem.application.maxApplicants,
+          formLink: newsItem.application.formLink,
+          status: newsItem.application.status, // 'active', 'expired', 'not_started'
+          targetType: newsItem.application.targetType, // 'Workshop', 'Event', 'Competition', 'Other'
+          targetId: newsItem.application.targetId
+        } : null,
+        createdAt: newsItem.createdAt,
+        updatedAt: newsItem.updatedAt
+      }));
+
+      // Combine and sort by navOrder
+      const navigationItems = [...formattedEvents, ...formattedNews]
+        .sort((a, b) => {
+          const orderA = a.featureOptions?.navOrder || 0;
+          const orderB = b.featureOptions?.navOrder || 0;
+          return orderA - orderB;
+        });
+
+      res.json({
+        success: true,
+        data: {
+          items: navigationItems,
+          total: navigationItems.length,
+          eventsCount: formattedEvents.length,
+          newsCount: formattedNews.length
+        }
+      });
+    } catch (error) {
+      console.error('Navigation API Error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch navigation items',
+        error: error.message
+      });
+    }
+  })
+);
 
 router.get(
   '/',
@@ -76,14 +197,27 @@ router.post(
     body('isFeatured').optional().isBoolean().toBoolean(),
     body('requiresRegistration').optional().isBoolean().toBoolean(),
     body('registrationFormLink').optional().isString().isLength({ max: 500 }),
-    body('registrationDeadline').optional().isISO8601().withMessage('Registration deadline must be a valid ISO8601 date'),
+    body('registrationDeadline').optional({ checkFalsy: true }).isISO8601().withMessage('Registration deadline must be a valid ISO8601 date'),
     body('featureOptions.showInNav').optional().isBoolean().toBoolean(),
-    body('featureOptions.navLabel').optional().isString().isLength({ min: 2, max: 50 }),
+    body('featureOptions.navLabel').optional({ checkFalsy: true }).isString().isLength({ min: 2, max: 50 }),
     body('featureOptions.navOrder').optional().isInt({ min: 0 }).toInt(),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) throw validationErrorHandler(errors);
+    
+    // Ensure endDate is not before startDate (same day allowed)
+    const { startDate, endDate } = req.body;
+    if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      if (end < start) {
+        return res.status(400).json({
+          success: false,
+          message: 'End date must be the same as or after start date'
+        });
+      }
+    }
     
     // Validate registration form link if registration is required
     if (req.body.requiresRegistration && !req.body.registrationFormLink) {
@@ -110,13 +244,25 @@ router.put('/:id', verifyToken, requireMentor, [
   param('id').isString(),
   body('requiresRegistration').optional().isBoolean().toBoolean(),
   body('registrationFormLink').optional().isString().isLength({ max: 500 }),
-  body('registrationDeadline').optional().isISO8601().withMessage('Registration deadline must be a valid ISO8601 date'),
+  body('registrationDeadline').optional({ checkFalsy: true }).isISO8601().withMessage('Registration deadline must be a valid ISO8601 date'),
   body('featureOptions.showInNav').optional().isBoolean().toBoolean(),
-  body('featureOptions.navLabel').optional().isString().isLength({ min: 2, max: 50 }),
+  body('featureOptions.navLabel').optional({ checkFalsy: true }).isString().isLength({ min: 2, max: 50 }),
   body('featureOptions.navOrder').optional().isInt({ min: 0 }).toInt(),
 ], asyncHandler(async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) throw validationErrorHandler(errors);
+  
+  // For partial updates, ensure endDate is not before startDate (same day allowed)
+  const existing = await Event.findById(req.params.id);
+  if (!existing) throw notFoundErrorHandler('Event');
+  const nextStart = req.body.startDate ? new Date(req.body.startDate) : new Date(existing.startDate);
+  const nextEnd = req.body.endDate ? new Date(req.body.endDate) : new Date(existing.endDate);
+  if (nextEnd < nextStart) {
+    return res.status(400).json({
+      success: false,
+      message: 'End date must be the same as or after start date'
+    });
+  }
   
   // Validate registration form link if registration is required
   if (req.body.requiresRegistration && !req.body.registrationFormLink) {
