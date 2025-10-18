@@ -13,6 +13,7 @@ const {
 const { asyncHandler, validationErrorHandler, notFoundErrorHandler } = require('../middleware/errorHandler');
 const Project = require('../models/Project');
 const { sendProjectCreatedNotification, sendProjectStatusChangedEmail } = require('../services/emailService');
+const logger = require('../utils/logger');
 
 // Helpers
 const ensureObjectId = (id) => (mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : null);

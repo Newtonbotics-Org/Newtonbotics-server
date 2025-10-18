@@ -3,6 +3,7 @@ const { body, param, query, validationResult } = require('express-validator');
 const router = express.Router();
 const { optionalAuth, verifyToken, requireTeamMember, requireMentor, requireAdmin } = require('../middleware/auth');
 const Event = require('../models/Event');
+const News = require('../models/News');
 const { asyncHandler, validationErrorHandler, notFoundErrorHandler } = require('../middleware/errorHandler');
 
 // TODO: Implement events routes
@@ -13,6 +14,126 @@ const { asyncHandler, validationErrorHandler, notFoundErrorHandler } = require('
 // - DELETE /api/events/:id - Delete event
 // - POST /api/events/:id/register - Register for event
 // - DELETE /api/events/:id/register - Unregister from event
+
+// Navigation API - Get all events and news with showInNav: true
+router.get(
+  '/navigation',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    try {
+      // Get events with showInNav: true
+      const events = await Event.find({ 'featureOptions.showInNav': true })
+        .select('_id title description category type startDate endDate location maxCapacity currentRegistrations registrationDeadline isFeatured imageUrl organizerId status requiresRegistration registrationFormLink featureOptions registrations createdAt updatedAt')
+        .populate('organizerId', 'name email')
+        .sort({ 'featureOptions.navOrder': 1, createdAt: -1 });
+
+      // Get news with showInNav: true
+      const news = await News.find({ 'featureOptions.showInNav': true })
+        .select('_id title content excerpt categoryId authorId featuredImageUrl tags isFeatured isPublished publishedAt viewCount featureOptions application createdAt updatedAt')
+        .populate('categoryId', 'name')
+        .populate('authorId', 'name email')
+        .sort({ 'featureOptions.navOrder': 1, createdAt: -1 });
+
+      // Format events for navigation
+      const formattedEvents = events.map(event => ({
+        id: event._id,
+        type: 'event',
+        title: event.title,
+        description: event.description,
+        category: event.category,
+        eventType: event.type, // 'workshop', 'seminar', 'exhibition', etc.
+        startDate: event.startDate,
+        endDate: event.endDate,
+        location: event.location,
+        maxCapacity: event.maxCapacity,
+        currentRegistrations: event.currentRegistrations,
+        registrationDeadline: event.registrationDeadline,
+        isFeatured: event.isFeatured,
+        imageUrl: event.imageUrl,
+        organizer: event.organizerId ? {
+          id: event.organizerId._id,
+          name: event.organizerId.name,
+          email: event.organizerId.email
+        } : null,
+        status: event.status, // 'upcoming', 'ongoing', 'completed', 'cancelled'
+        requiresRegistration: event.requiresRegistration,
+        registrationFormLink: event.registrationFormLink,
+        featureOptions: event.featureOptions,
+        registrations: event.registrations.map(reg => ({
+          userId: reg.userId,
+          registrationDate: reg.registrationDate,
+          attendanceStatus: reg.attendanceStatus
+        })),
+        createdAt: event.createdAt,
+        updatedAt: event.updatedAt
+      }));
+
+      // Format news for navigation
+      const formattedNews = news.map(newsItem => ({
+        id: newsItem._id,
+        type: 'news',
+        title: newsItem.title,
+        content: newsItem.content,
+        excerpt: newsItem.excerpt,
+        category: newsItem.categoryId ? {
+          id: newsItem.categoryId._id,
+          name: newsItem.categoryId.name
+        } : null,
+        author: newsItem.authorId ? {
+          id: newsItem.authorId._id,
+          name: newsItem.authorId.name,
+          email: newsItem.authorId.email
+        } : null,
+        featuredImageUrl: newsItem.featuredImageUrl,
+        tags: newsItem.tags,
+        isFeatured: newsItem.isFeatured,
+        isPublished: newsItem.isPublished,
+        publishedAt: newsItem.publishedAt,
+        viewCount: newsItem.viewCount,
+        featureOptions: newsItem.featureOptions,
+        application: newsItem.application ? {
+          isEnabled: newsItem.application.isEnabled,
+          type: newsItem.application.type, // 'workshop', 'event', 'competition', 'other'
+          requireLogin: newsItem.application.requireLogin,
+          formApplyStartDate: newsItem.application.formApplyStartDate,
+          formApplyLastDate: newsItem.application.formApplyLastDate,
+          maxApplicants: newsItem.application.maxApplicants,
+          formLink: newsItem.application.formLink,
+          status: newsItem.application.status, // 'active', 'expired', 'not_started'
+          targetType: newsItem.application.targetType, // 'Workshop', 'Event', 'Competition', 'Other'
+          targetId: newsItem.application.targetId
+        } : null,
+        createdAt: newsItem.createdAt,
+        updatedAt: newsItem.updatedAt
+      }));
+
+      // Combine and sort by navOrder
+      const navigationItems = [...formattedEvents, ...formattedNews]
+        .sort((a, b) => {
+          const orderA = a.featureOptions?.navOrder || 0;
+          const orderB = b.featureOptions?.navOrder || 0;
+          return orderA - orderB;
+        });
+
+      res.json({
+        success: true,
+        data: {
+          items: navigationItems,
+          total: navigationItems.length,
+          eventsCount: formattedEvents.length,
+          newsCount: formattedNews.length
+        }
+      });
+    } catch (error) {
+      console.error('Navigation API Error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to fetch navigation items',
+        error: error.message
+      });
+    }
+  })
+);
 
 router.get(
   '/',
