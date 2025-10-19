@@ -18,6 +18,7 @@ const { asyncHandler, validationErrorHandler, notFoundErrorHandler, authorizatio
 // - POST /api/project-requests/:id/reject - Reject project request (mentors only)
 // - GET /api/project-requests/:id/audit-trail - Get audit trail for specific request (owner or admin)
 // - GET /api/project-requests/audit-trails/all - Get all audit trails (admin only)
+// - GET /api/project-requests/deleted - Get all deleted project requests (admin only)
 
 router.get(
   '/',
@@ -80,6 +81,68 @@ router.get('/my-requests', verifyToken, [
         limit, 
         skip, 
         hasMore: total > skip + items.length 
+      } 
+    } 
+  });
+}));
+
+// @route   GET /api/project-requests/deleted
+// @desc    Get all deleted project requests (admin only)
+// @access  Private (Admin)
+router.get('/deleted', verifyToken, requireAdmin, [
+  query('status').optional().isIn(['pending', 'under_review', 'approved', 'rejected', 'on_hold']),
+  query('submittedBy').optional().isString(),
+  query('deletedBy').optional().isString(),
+  query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
+  query('skip').optional().isInt({ min: 0 }).toInt(),
+  query('sortBy').optional().isIn(['deletedAt', 'submittedAt', 'title']),
+  query('sortOrder').optional().isIn(['asc', 'desc']),
+], asyncHandler(async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw validationErrorHandler(errors);
+  
+  const { 
+    status, 
+    submittedBy, 
+    deletedBy, 
+    limit = 20, 
+    skip = 0, 
+    sortBy = 'deletedAt', 
+    sortOrder = 'desc' 
+  } = req.query;
+  
+  // Build filter for deleted projects
+  const filter = { isDeleted: true };
+  
+  if (status) filter.status = status;
+  if (submittedBy) filter.submittedBy = submittedBy;
+  if (deletedBy) filter.deletedBy = deletedBy;
+  
+  // Build sort object
+  const sort = {};
+  sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
+  
+  const [items, total] = await Promise.all([
+    ProjectRequest.find(filter)
+      .populate('submittedBy', 'firstName lastName email role')
+      .populate('deletedBy', 'firstName lastName email role')
+      .populate('mentorId', 'firstName lastName email role')
+      .populate('teamMembers.userId', 'firstName lastName email role')
+      .limit(parseInt(limit))
+      .skip(parseInt(skip))
+      .sort(sort),
+    ProjectRequest.countDocuments(filter),
+  ]);
+  
+  res.json({ 
+    success: true, 
+    data: { 
+      items, 
+      pagination: { 
+        total, 
+        limit: parseInt(limit), 
+        skip: parseInt(skip), 
+        hasMore: total > parseInt(skip) + items.length 
       } 
     } 
   });

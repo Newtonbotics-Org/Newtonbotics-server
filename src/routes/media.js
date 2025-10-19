@@ -17,6 +17,18 @@ const { asyncHandler, validationErrorHandler, notFoundErrorHandler } = require('
 // - POST /api/media/upload - Upload media file
 // - GET /api/media/search - Search media files
 
+// GET /api/media/categories - List media categories (must be before /:id route)
+router.get('/categories', optionalAuth, asyncHandler(async (req, res) => {
+  const items = await MediaCategory.find({}).sort({ name: 1 });
+  res.json({ success: true, data: { items } });
+}));
+
+// GET /api/media/collections - List media collections (must be before /:id route)
+router.get('/collections', optionalAuth, asyncHandler(async (req, res) => {
+  const items = await MediaCollection.find({}).sort({ createdAt: -1 });
+  res.json({ success: true, data: { items } });
+}));
+
 router.get(
   '/',
   optionalAuth,
@@ -119,12 +131,7 @@ router.delete('/:id', verifyToken, requireMentor, [param('id').isString()], asyn
   res.json({ success: true, message: 'Media deleted' });
 }));
 
-// Media categories
-router.get('/categories', optionalAuth, asyncHandler(async (req, res) => {
-  const items = await MediaCategory.find({}).sort({ name: 1 });
-  res.json({ success: true, data: { items } });
-}));
-
+// Media categories CRUD operations
 router.post('/categories', verifyToken, requireTeamMember, [body('name').isString().isLength({ min: 2, max: 100 })], asyncHandler(async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) throw validationErrorHandler(errors);
@@ -144,12 +151,7 @@ router.delete('/categories/:id', verifyToken, requireMentor, [param('id').isStri
   res.json({ success: true, message: 'Category deleted' });
 }));
 
-// Media collections (basic create/list)
-router.get('/collections', optionalAuth, asyncHandler(async (req, res) => {
-  const items = await MediaCollection.find({}).sort({ createdAt: -1 });
-  res.json({ success: true, data: { items } });
-}));
-
+// Media collections CRUD operations
 router.post('/collections', verifyToken, requireTeamMember, [body('name').isString().isLength({ min: 2, max: 255 })], asyncHandler(async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) throw validationErrorHandler(errors);
