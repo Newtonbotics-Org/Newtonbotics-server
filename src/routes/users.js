@@ -151,7 +151,23 @@ const updateUserValidation = [
     .optional()
     .trim()
     .isURL({ protocols: ['http','https'], require_protocol: true })
-    .withMessage('Profile image must be a valid URL')
+    .withMessage('Profile image must be a valid URL'),
+  
+  body('subroles')
+    .optional()
+    .isArray()
+    .withMessage('Subroles must be an array'),
+  
+  body('subroles.*')
+    .optional()
+    .custom(async (subroleName) => {
+      const Subrole = require('../models/Subrole');
+      const subrole = await Subrole.findOne({ name: subroleName, isActive: true });
+      if (!subrole) {
+        throw new Error('Invalid or inactive subrole');
+      }
+      return true;
+    })
 ];
 
 const searchValidation = [
@@ -259,6 +275,7 @@ router.get('/profile', asyncHandler(async (req, res) => {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        subroles: user.subroles || [],
         studentId: user.studentId,
         department: user.department,
         yearOfStudy: user.yearOfStudy,
@@ -322,6 +339,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        subroles: user.subroles || [],
         studentId: user.studentId,
         department: user.department,
         yearOfStudy: user.yearOfStudy,
@@ -393,6 +411,7 @@ router.put('/profile', updateUserValidation, asyncHandler(async (req, res) => {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        subroles: user.subroles || [],
         studentId: user.studentId,
         department: user.department,
         yearOfStudy: user.yearOfStudy,
@@ -466,6 +485,7 @@ router.put('/:id', requireAdmin, updateUserValidation, asyncHandler(async (req, 
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        subroles: user.subroles || [],
         studentId: user.studentId,
         department: user.department,
         yearOfStudy: user.yearOfStudy,
@@ -588,6 +608,87 @@ router.get('/roles', asyncHandler(async (req, res) => {
     success: true,
     data: {
       roles
+    }
+  });
+}));
+
+// @route   GET /api/users/subroles
+// @desc    Get list of available subroles (deprecated - use /api/subroles/active instead)
+// @access  Private
+router.get('/subroles', asyncHandler(async (req, res) => {
+  const Subrole = require('../models/Subrole');
+  const subroles = await Subrole.getActiveSubroles();
+  
+  const subroleNames = subroles.map(subrole => subrole.name);
+
+  res.json({
+    success: true,
+    data: {
+      subroles: subroleNames
+    },
+    message: 'This endpoint is deprecated. Use /api/subroles/active for detailed subrole information.'
+  });
+}));
+
+// @route   PUT /api/users/:id/subroles
+// @desc    Update user subroles (admin only)
+// @access  Private (Admin)
+router.put('/:id/subroles', requireAdmin, [
+  body('subroles')
+    .isArray()
+    .withMessage('Subroles must be an array'),
+  
+  body('subroles.*')
+    .custom(async (subroleName) => {
+      const Subrole = require('../models/Subrole');
+      const subrole = await Subrole.findOne({ name: subroleName, isActive: true });
+      if (!subrole) {
+        throw new Error('Invalid or inactive subrole');
+      }
+      return true;
+    })
+], asyncHandler(async (req, res) => {
+  // Check for validation errors
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    throw validationErrorHandler(errors);
+  }
+
+  const { id } = req.params;
+  const { subroles } = req.body;
+
+  const user = await User.findById(id);
+  
+  if (!user) {
+    throw notFoundErrorHandler('User');
+  }
+
+  // Update subroles
+  user.subroles = subroles;
+  await user.save();
+
+  // Log subrole update by admin
+  logger.info(`User subroles updated by admin ${req.user.id}`, {
+    targetUserId: id,
+    targetUserEmail: user.email,
+    newSubroles: subroles,
+    previousSubroles: user.subroles
+  });
+
+  res.json({
+    success: true,
+    message: 'User subroles updated successfully',
+    data: {
+      user: {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        subroles: user.subroles,
+        department: user.department,
+        updatedAt: user.updatedAt
+      }
     }
   });
 }));

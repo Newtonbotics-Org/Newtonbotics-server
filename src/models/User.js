@@ -48,51 +48,6 @@ const userSchema = new mongoose.Schema({
   // Subroles and specializations for additional responsibilities
   subroles: [{
     type: String,
-    enum: {
-      values: [
-        // Management & Leadership
-        'project_manager', 'team_lead', 'research_lead', 'technical_lead',
-        'mentor_coordinator', 'lab_coordinator', 'department_head',
-        
-        // Financial & Administrative
-        'finance_manager', 'budget_coordinator', 'grant_writer', 'procurement_officer',
-        'hr_coordinator', 'compliance_officer', 'legal_advisor',
-        
-        // Technical Specializations
-        'software_developer', 'hardware_engineer', 'data_scientist', 'ai_researcher',
-        'robotics_specialist', 'electronics_expert', 'mechanical_engineer',
-        'web_developer', 'mobile_developer', 'devops_engineer',
-        
-        // Lab Operations
-        'inventory_manager', 'equipment_specialist', 'safety_officer', 'quality_assurance',
-        'maintenance_coordinator', 'calibration_specialist', 'lab_supervisor',
-        
-        // Communication & Outreach
-        'social_media_manager', 'communications_officer', 'public_relations', 'marketing_coordinator',
-        'outreach_coordinator', 'community_manager', 'content_creator',
-        
-        // Event & Workshop Management
-        'workshop_coordinator', 'event_organizer', 'conference_manager', 'seminar_coordinator',
-        'training_coordinator', 'competition_organizer',
-        
-        // Research & Publication
-        'publication_coordinator', 'research_coordinator', 'data_curator', 'literature_reviewer',
-        'peer_reviewer', 'research_assistant', 'lab_technician',
-        
-        // Industry & Partnerships
-        'industry_liaison', 'partnership_coordinator', 'business_developer', 'startup_mentor',
-        'patent_officer', 'technology_transfer',
-        
-        // Student Support
-        'student_advisor', 'career_counselor', 'academic_coordinator', 'tutoring_coordinator',
-        'peer_mentor', 'study_group_leader',
-        
-        // Special Designations
-        'poc', 'key_contact', 'emergency_contact', 'first_responder',
-        'crisis_manager', 'incident_coordinator'
-      ],
-      message: 'Invalid subrole value'
-    },
     trim: true,
     index: true
   }],
@@ -201,6 +156,7 @@ const userSchema = new mongoose.Schema({
         'read:news', 'write:news', 'delete:news',
         'read:media', 'write:media', 'delete:media',
         'read:users', 'write:users', 'delete:users',
+        'read:subroles', 'write:subroles', 'delete:subroles', 'manage:subroles',
         'manage:finance',
         'manage:system', 'system:admin'
       ],
@@ -339,7 +295,7 @@ userSchema.methods.getDefaultPermissions = function() {
     mentor: ['read:projects', 'write:projects', 'delete:projects', 'read:workshops', 'write:workshops', 'read:events', 'write:events', 'read:inventory', 'write:inventory', 'read:requests', 'approve:requests', 'read:news', 'write:news', 'read:media', 'write:media'],
     researcher: ['read:projects', 'write:projects', 'delete:projects', 'read:workshops', 'write:workshops', 'delete:workshops', 'read:events', 'write:events', 'delete:events', 'read:inventory', 'write:inventory', 'delete:inventory', 'read:requests', 'write:requests', 'approve:requests', 'read:news', 'write:news', 'delete:news', 'read:media', 'write:media', 'delete:media'],
     community: ['read:projects', 'read:workshops', 'read:events', 'read:news', 'read:media'],
-    admin: ['read:projects', 'write:projects', 'delete:projects', 'manage:projects', 'read:workshops', 'write:workshops', 'delete:workshops', 'read:events', 'write:events', 'delete:events', 'read:inventory', 'write:inventory', 'delete:inventory', 'manage:inventory', 'read:requests', 'write:requests', 'approve:requests', 'read:news', 'write:news', 'delete:news', 'read:media', 'write:media', 'delete:media', 'read:users', 'write:users', 'delete:users', 'manage:finance', 'manage:system', 'system:admin']
+    admin: ['read:projects', 'write:projects', 'delete:projects', 'manage:projects', 'read:workshops', 'write:workshops', 'delete:workshops', 'read:events', 'write:events', 'delete:events', 'read:inventory', 'write:inventory', 'delete:inventory', 'manage:inventory', 'read:requests', 'write:requests', 'approve:requests', 'read:news', 'write:news', 'delete:news', 'read:media', 'write:media', 'delete:media', 'read:users', 'write:users', 'delete:users', 'read:subroles', 'write:subroles', 'delete:subroles', 'manage:subroles', 'manage:finance', 'manage:system', 'system:admin']
   };
 
   return rolePermissions[this.role] || [];
