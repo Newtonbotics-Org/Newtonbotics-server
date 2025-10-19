@@ -33,6 +33,8 @@ const messageRoutes = require('./routes/messages');
 const publicRoutes = require('./routes/public');
 const roleApprovalRoutes = require('./routes/roleApprovals');
 const researchAreaRoutes = require('./routes/researchAreas');
+const adminDashboardRoutes = require('./routes/adminDashboard');
+const subroleRoutes = require('./routes/subroles');
 const { default: mongoose } = require('mongoose');
 const ContactSubmission = require('./models/ContactSubmission');
 const User = require('./models/User');
@@ -153,6 +155,8 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/role-approvals', roleApprovalRoutes);
 app.use('/api/research-areas', researchAreaRoutes);
+app.use('/api/admin/dashboard', adminDashboardRoutes);
+app.use('/api/subroles', subroleRoutes);
 
 // Error handling middleware
 app.use(notFoundHandler);
