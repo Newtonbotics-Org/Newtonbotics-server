@@ -156,3 +156,4 @@ notificationSettingsSchema.statics.getUsersForNotification = async function(chan
 
 module.exports = mongoose.model('NotificationSettings', notificationSettingsSchema);
 
+
