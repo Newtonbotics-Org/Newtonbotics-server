@@ -536,3 +536,4 @@ All endpoints return consistent error responses:
 4. **Aggregation**: Uses MongoDB aggregation for efficient data processing
 5. **Background Processing**: Notification sending can be moved to background jobs
 
+
