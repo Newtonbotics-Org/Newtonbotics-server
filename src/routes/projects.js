@@ -421,6 +421,134 @@ router.post(
   })
 );
 
+// PUT/PATCH /api/projects/:id/members/:memberId - update member by membershipId or userId
+const updateMemberHandler = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw validationErrorHandler(errors);
+
+  const objId = ensureObjectId(req.params.id);
+  if (!objId) throw notFoundErrorHandler('Project');
+
+  const project = await Project.findById(objId);
+  if (!project) throw notFoundErrorHandler('Project');
+
+  const isLeader = project.teamLeaderId?.toString() === req.user.id;
+  const isMentor = project.mentorId?.toString() === req.user.id;
+  const isAdmin = req.user.role === 'admin';
+  if (!isLeader && !isMentor && !isAdmin) {
+    return res.status(403).json({ success: false, message: 'Only team leader, mentor, or admin can update members' });
+  }
+
+  const updates = req.body || {};
+  const allowed = ['role', 'skills', 'responsibilities', 'isActive'];
+  const toApply = {};
+  for (const key of allowed) {
+    if (Object.prototype.hasOwnProperty.call(updates, key)) {
+      toApply[key] = updates[key];
+    }
+  }
+
+  // If nothing to update, return early
+  if (Object.keys(toApply).length === 0) {
+    return res.status(400).json({ success: false, message: 'No updatable fields provided' });
+  }
+
+  const memberParam = req.params.memberId;
+  const asObjectId = ensureObjectId(memberParam);
+
+  // Try membership subdocument _id first
+  let memberDoc = asObjectId ? project.teamMembers.id(asObjectId) : null;
+
+  // Fallback: try by userId
+  if (!memberDoc && asObjectId) {
+    memberDoc = project.teamMembers.find(m => m.userId && m.userId.toString() === asObjectId.toString());
+  }
+
+  if (!memberDoc) {
+    return res.status(404).json({ success: false, message: 'Member not found' });
+  }
+
+  // Apply updates
+  if (toApply.role !== undefined) memberDoc.role = toApply.role;
+  if (toApply.skills !== undefined) memberDoc.skills = Array.isArray(toApply.skills) ? toApply.skills : [];
+  if (toApply.responsibilities !== undefined) memberDoc.responsibilities = Array.isArray(toApply.responsibilities) ? toApply.responsibilities : [];
+  if (toApply.isActive !== undefined) memberDoc.isActive = Boolean(toApply.isActive);
+
+  await project.save();
+  const populated = await Project.findById(objId).populate('teamMembers.userId', 'firstName lastName email role profileImageUrl');
+  return res.json({ success: true, message: 'Member updated', data: { members: populated.teamMembers } });
+};
+
+router.put(
+  '/:id/members/:memberId',
+  verifyToken,
+  [param('id').isString(), param('memberId').isString()],
+  asyncHandler(updateMemberHandler)
+);
+
+router.patch(
+  '/:id/members/:memberId',
+  verifyToken,
+  [param('id').isString(), param('memberId').isString()],
+  asyncHandler(updateMemberHandler)
+);
+
+// PUT/PATCH /api/projects/:id/members with body { userId, ... }
+const updateMemberByBodyHandler = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw validationErrorHandler(errors);
+
+  const objId = ensureObjectId(req.params.id);
+  if (!objId) throw notFoundErrorHandler('Project');
+  const project = await Project.findById(objId);
+  if (!project) throw notFoundErrorHandler('Project');
+
+  const isLeader = project.teamLeaderId?.toString() === req.user.id;
+  const isMentor = project.mentorId?.toString() === req.user.id;
+  const isAdmin = req.user.role === 'admin';
+  if (!isLeader && !isMentor && !isAdmin) {
+    return res.status(403).json({ success: false, message: 'Only team leader, mentor, or admin can update members' });
+  }
+
+  const userIdObj = ensureObjectId(req.body.userId);
+  if (!userIdObj) return res.status(400).json({ success: false, message: 'Invalid userId' });
+
+  const memberDoc = project.teamMembers.find(m => m.userId && m.userId.toString() === userIdObj.toString());
+  if (!memberDoc) return res.status(404).json({ success: false, message: 'Member not found' });
+
+  const updates = req.body || {};
+  const allowed = ['role', 'skills', 'responsibilities', 'isActive'];
+  for (const key of allowed) {
+    if (Object.prototype.hasOwnProperty.call(updates, key)) {
+      if (key === 'skills' || key === 'responsibilities') {
+        memberDoc[key] = Array.isArray(updates[key]) ? updates[key] : [];
+      } else if (key === 'isActive') {
+        memberDoc[key] = Boolean(updates[key]);
+      } else {
+        memberDoc[key] = updates[key];
+      }
+    }
+  }
+
+  await project.save();
+  const populated = await Project.findById(objId).populate('teamMembers.userId', 'firstName lastName email role profileImageUrl');
+  return res.json({ success: true, message: 'Member updated', data: { members: populated.teamMembers } });
+};
+
+router.put(
+  '/:id/members',
+  verifyToken,
+  [param('id').isString(), body('userId').isString()],
+  asyncHandler(updateMemberByBodyHandler)
+);
+
+router.patch(
+  '/:id/members',
+  verifyToken,
+  [param('id').isString(), body('userId').isString()],
+  asyncHandler(updateMemberByBodyHandler)
+);
+
 // DELETE /api/projects/:id/members/:memberId - memberId is userId
 router.delete(
   '/:id/members/:memberId',
