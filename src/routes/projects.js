@@ -87,7 +87,12 @@ router.get(
     const { id } = req.params;
     const objId = ensureObjectId(id);
     if (!objId) throw notFoundErrorHandler('Project');
-    const project = await Project.findById(objId)
+    // Atomically increment view count and return updated doc
+    const project = await Project.findByIdAndUpdate(
+      objId,
+      { $inc: { viewCount: 1 } },
+      { new: true }
+    )
       .populate('mentorId', 'firstName lastName email role')
       .populate('teamLeaderId', 'firstName lastName email role')
       .populate('teamMembers.userId', 'firstName lastName email role profileImageUrl');
@@ -556,11 +561,11 @@ router.delete(
   [param('id').isString(), param('memberId').isString()],
   asyncHandler(async (req, res) => {
     const objId = ensureObjectId(req.params.id);
-    const memberUserId = ensureObjectId(req.params.memberId);
-    if (!objId || !memberUserId) throw notFoundErrorHandler('Project');
+    if (!objId) throw notFoundErrorHandler('Project');
 
     const project = await Project.findById(objId);
     if (!project) throw notFoundErrorHandler('Project');
+
     const isLeader = project.teamLeaderId?.toString() === req.user.id;
     const isMentor = project.mentorId?.toString() === req.user.id;
     const isAdmin = req.user.role === 'admin';
@@ -568,9 +573,39 @@ router.delete(
       return res.status(403).json({ success: false, message: 'Only team leader, mentor, or admin can remove members' });
     }
 
-    await project.removeTeamMember(memberUserId);
+    const memberParam = req.params.memberId;
+    const asObjectId = ensureObjectId(memberParam);
+
+    // Try membership subdocument _id first
+    let memberDoc = asObjectId ? project.teamMembers.id(asObjectId) : null;
+    let targetUserId = null;
+
+    if (memberDoc && memberDoc.userId) {
+      targetUserId = memberDoc.userId;
+    } else {
+      // Fallback: treat param as userId
+      const maybeUserId = asObjectId;
+      if (maybeUserId) {
+        memberDoc = project.teamMembers.find(m => m.userId && m.userId.toString() === maybeUserId.toString());
+        if (memberDoc) targetUserId = maybeUserId;
+      }
+    }
+
+    if (!targetUserId) {
+      return res.status(404).json({ success: false, message: 'Member not found' });
+    }
+
+    try {
+      await project.removeTeamMember(targetUserId);
+    } catch (err) {
+      if (String(err && err.message) === 'User is not a team member') {
+        return res.status(404).json({ success: false, message: 'Member not found' });
+      }
+      throw err;
+    }
+
     const populated = await Project.findById(objId).populate('teamMembers.userId', 'firstName lastName email role profileImageUrl');
-    res.json({ success: true, message: 'Member removed', data: { members: populated.teamMembers } });
+    return res.json({ success: true, message: 'Member removed', data: { members: populated.teamMembers } });
   })
 );
 

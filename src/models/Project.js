@@ -435,6 +435,34 @@ projectSchema.index({ tags: 1 });
 projectSchema.index({ priority: 1 });
 projectSchema.index({ difficulty: 1 });
 
+// Safety net: pre-validate hook to auto-fill missing teamMembers.userName when userId is valid
+projectSchema.pre('validate', async function(next) {
+  try {
+    if (!this.teamMembers || this.teamMembers.length === 0) return next();
+    const needsFill = this.teamMembers.filter(m => m && m.userId && (!m.userName || m.userName.trim() === ''));
+    if (needsFill.length === 0) return next();
+
+    const User = mongoose.model('User');
+    // Fetch distinct userIds that need filling
+    const ids = [...new Set(needsFill.map(m => m.userId.toString()))];
+    const users = await User.find({ _id: { $in: ids } }, 'firstName lastName isActive');
+    const idToUser = new Map(users.map(u => [u._id.toString(), u]));
+
+    this.teamMembers.forEach(m => {
+      if (m && m.userId && (!m.userName || m.userName.trim() === '')) {
+        const u = idToUser.get(m.userId.toString());
+        if (u) {
+          const name = `${u.firstName || ''} ${u.lastName || ''}`.trim();
+          if (name) m.userName = name;
+        }
+      }
+    });
+    return next();
+  } catch (err) {
+    return next(err);
+  }
+});
+
 // Compound indexes
 projectSchema.index({ status: 1, category: 1 });
 projectSchema.index({ status: 1, startDate: 1 });
