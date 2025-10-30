@@ -47,10 +47,11 @@ const publicUserProjection = {
 };
 
 // Builds a safe public payload for a user respecting privacy preferences
-function mapPublicUser(userDoc) {
+function mapPublicUser(userDoc, options = {}) {
+  const { forceIncludeEmail = false } = options;
   const user = userDoc.toObject({ virtuals: true });
   const visibility = user.preferences?.privacy?.profileVisibility || 'members';
-  const showEmail = Boolean(user.preferences?.privacy?.showEmail);
+  const showEmail = forceIncludeEmail || Boolean(user.preferences?.privacy?.showEmail);
   const showPhone = Boolean(user.preferences?.privacy?.showPhone);
 
   // Only expose email/phone if flagged to show; otherwise omit them
@@ -84,6 +85,7 @@ function mapPublicUser(userDoc) {
       displayName: user.displayName,
       role: user.role,
       profileImageUrl: user.profileImageUrl,
+      ...(forceIncludeEmail && { email: user.email }),
     };
   }
 
@@ -351,7 +353,7 @@ const getPeopleByRole = (targetRole) => asyncHandler(async (req, res) => {
       User.countDocuments(filter),
     ]);
 
-    const items = users.map(mapPublicUser);
+    const items = users.map(user => mapPublicUser(user, { forceIncludeEmail: true }));
 
     res.json({
       success: true,
@@ -410,7 +412,7 @@ router.get('/leadership-team', asyncHandler(async (req, res) => {
       User.countDocuments(filter),
     ]);
 
-    const items = users.map(mapPublicUser);
+    const items = users.map(user => mapPublicUser(user, { forceIncludeEmail: true }));
 
     res.json({
       success: true,
