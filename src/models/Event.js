@@ -19,6 +19,32 @@ const eventSchema = new mongoose.Schema(
     },
     startDate: { type: Date, required: true },
     endDate: { type: Date, required: true },
+    startTime: { 
+      type: String, 
+      trim: true,
+      validate: {
+        validator: function(value) {
+          if (!value) return true; // Optional field
+          // Validate time format: HH:MM or HH:MM:SS (24-hour format)
+          const timePattern = /^([01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?$/;
+          return timePattern.test(value);
+        },
+        message: 'Start time must be in HH:MM or HH:MM:SS format (24-hour)'
+      }
+    },
+    endTime: { 
+      type: String, 
+      trim: true,
+      validate: {
+        validator: function(value) {
+          if (!value) return true; // Optional field
+          // Validate time format: HH:MM or HH:MM:SS (24-hour format)
+          const timePattern = /^([01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?$/;
+          return timePattern.test(value);
+        },
+        message: 'End time must be in HH:MM or HH:MM:SS format (24-hour)'
+      }
+    },
     location: { type: String, maxlength: 255, trim: true },
     maxCapacity: { type: Number, min: 1 },
     currentRegistrations: { type: Number, default: 0, min: 0 },
@@ -74,7 +100,12 @@ const eventSchema = new mongoose.Schema(
     },
     registrations: [registrationSchema],
   },
-  { timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' } }
+  { 
+    timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' },
+    toJSON: { virtuals: true, getters: true },
+    toObject: { virtuals: true, getters: true },
+    minimize: false // Don't remove empty objects/fields
+  }
 );
 
 // Virtual to check if registration is open
@@ -95,6 +126,55 @@ eventSchema.virtual('isAtCapacity').get(function() {
 eventSchema.virtual('availableSpots').get(function() {
   if (!this.maxCapacity) return null;
   return Math.max(0, this.maxCapacity - this.currentRegistrations);
+});
+
+// Method to calculate status based on current date/time and event dates/times
+eventSchema.methods.calculateStatus = function() {
+  // Don't auto-update if event is manually cancelled
+  if (this.status === 'cancelled') {
+    return 'cancelled';
+  }
+  
+  const now = new Date();
+  
+  // Build start and end datetime considering time if provided
+  let startDateTime = new Date(this.startDate);
+  let endDateTime = new Date(this.endDate);
+  
+  // If times are provided, combine date and time
+  if (this.startTime) {
+    const [hours, minutes, seconds] = this.startTime.split(':').map(Number);
+    startDateTime.setHours(hours || 0, minutes || 0, seconds || 0, 0);
+  } else {
+    // If no time, use start of day (00:00:00)
+    startDateTime.setHours(0, 0, 0, 0);
+  }
+  
+  if (this.endTime) {
+    const [hours, minutes, seconds] = this.endTime.split(':').map(Number);
+    endDateTime.setHours(hours || 0, minutes || 0, seconds || 0, 0);
+  } else {
+    // If no time, use end of day (23:59:59)
+    endDateTime.setHours(23, 59, 59, 999);
+  }
+  
+  // Calculate status based on current date/time
+  if (now < startDateTime) {
+    return 'upcoming';
+  } else if (now >= startDateTime && now <= endDateTime) {
+    return 'ongoing';
+  } else {
+    return 'completed';
+  }
+};
+
+// Pre-save middleware to automatically update status based on dates
+eventSchema.pre('save', function(next) {
+  // Only auto-update if status is not manually set to 'cancelled'
+  if (this.status !== 'cancelled') {
+    this.status = this.calculateStatus();
+  }
+  next();
 });
 
 eventSchema.index({ type: 1, startDate: 1 });
