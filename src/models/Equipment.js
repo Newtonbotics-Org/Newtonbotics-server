@@ -3,18 +3,24 @@ const mongoose = require('mongoose');
 const checkoutSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   quantity: { type: Number, required: true, min: 1 },
-  checkoutDate: { type: Date, default: Date.now },
-  expectedReturnDate: { type: Date, required: true },
+  checkoutDate: { type: Date, default: Date.now, required: true },
+  expectedReturnDate: { type: Date }, // Optional - if null, item may never return (e.g., for projects)
   actualReturnDate: { type: Date },
   checkoutNotes: { type: String, maxlength: 1000 },
   returnNotes: { type: String, maxlength: 1000 },
-  status: { type: String, enum: ['checked_out', 'returned', 'overdue', 'lost'], default: 'checked_out' },
+  status: { type: String, enum: ['checked_out', 'returned', 'overdue', 'lost', 'project_use'], default: 'checked_out' },
+  // Project association - if item is for a project, it may never return
+  projectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Project' },
+  projectName: { type: String, maxlength: 255, trim: true }, // Snapshot for historical records
   // Urgent checkout fields
   isUrgent: { type: Boolean, default: false },
   requestedQuantity: { type: Number, min: 1 },
   fulfilledQuantity: { type: Number, min: 0 },
   overdrawnQuantity: { type: Number, min: 0, default: 0 },
   userNameSnapshot: { type: String, maxlength: 255, trim: true },
+  // Checkout metadata
+  checkedOutBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // Admin/inventory manager who processed checkout
+  returnedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, // Admin/inventory manager who processed return
 });
 
 const equipmentSchema = new mongoose.Schema(

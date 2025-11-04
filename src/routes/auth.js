@@ -931,6 +931,7 @@ router.get('/me', asyncHandler(async (req, res) => {
         firstName: fullUser.firstName,
         lastName: fullUser.lastName,
         role: fullUser.role,
+        subroles: fullUser.subroles || [],
         studentId: fullUser.studentId,
         department: fullUser.department,
         yearOfStudy: fullUser.yearOfStudy,

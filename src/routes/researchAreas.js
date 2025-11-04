@@ -5,6 +5,49 @@ const { optionalAuth, verifyToken, requireMentor, requireAdmin } = require('../m
 const ResearchArea = require('../models/ResearchArea');
 const { asyncHandler, validationErrorHandler, notFoundErrorHandler } = require('../middleware/errorHandler');
 
+// GET /api/research-areas/categories - List all categories (public)
+// MUST be defined BEFORE /:id route to avoid route conflicts
+router.get(
+  '/categories',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const categories = await ResearchArea.distinct('category', { isActive: true });
+    res.json({
+      success: true,
+      data: { categories: categories.sort() },
+    });
+  })
+);
+
+// POST /api/research-areas/:id/recalculate-members - Recalculate memberCount (mentor+)
+router.post(
+  '/:id/recalculate-members',
+  verifyToken,
+  requireMentor,
+  [param('id').isString()],
+  asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) throw validationErrorHandler(errors);
+    
+    const researchArea = await ResearchArea.findById(req.params.id);
+    if (!researchArea) throw notFoundErrorHandler('Research Area');
+    
+    const oldCount = researchArea.memberCount;
+    await researchArea.calculateMemberCount();
+    await researchArea.save();
+    
+    res.json({
+      success: true,
+      message: 'Member count recalculated',
+      data: {
+        oldCount,
+        newCount: researchArea.memberCount,
+        item: researchArea.toObject(),
+      },
+    });
+  })
+);
+
 // GET /api/research-areas - List research areas (public)
 router.get(
   '/',
@@ -43,10 +86,23 @@ router.get(
       ResearchArea.countDocuments(filter),
     ]);
     
+    // Recalculate memberCount for all items and convert to objects
+    const itemsWithStudentIds = await Promise.all(items.map(async (item) => {
+      // Recalculate memberCount to ensure it's up-to-date
+      await item.calculateMemberCount();
+      if (item.isModified('memberCount')) {
+        await item.save();
+      }
+      
+      const itemObj = item.toObject();
+      itemObj.studentIds = item.studentIds || [];
+      return itemObj;
+    }));
+    
     res.json({
       success: true,
       data: {
-        items,
+        items: itemsWithStudentIds,
         pagination: { total, limit, skip, hasMore: total > skip + items.length },
       },
     });
@@ -65,7 +121,17 @@ router.get(
     const item = await ResearchArea.findById(req.params.id).select('-__v');
     if (!item) throw notFoundErrorHandler('Research Area');
     
-    res.json({ success: true, data: { item } });
+    // Recalculate memberCount to ensure it's up-to-date
+    await item.calculateMemberCount();
+    if (item.isModified('memberCount')) {
+      await item.save();
+    }
+    
+    // Convert to object and explicitly include studentIds
+    const itemObj = item.toObject();
+    itemObj.studentIds = item.studentIds || [];
+    
+    res.json({ success: true, data: { item: itemObj } });
   })
 );
 
@@ -90,20 +156,42 @@ router.post(
     body('requiredSkills.*').optional().isString().isLength({ max: 200 }),
     body('collaborationOpportunities').optional().isString().isLength({ max: 1000 }),
     body('fundingInfo').optional().isString().isLength({ max: 1000 }),
+    body('externalLinks').optional().isArray(),
+    body('externalLinks.*.title').optional().isString().trim().isLength({ min: 1, max: 100 }),
+    body('externalLinks.*.url').optional().isString().trim().isLength({ min: 1, max: 500 }).isURL(),
+    body('externalLinks.*.description').optional().isString().trim().isLength({ max: 500 }),
+    body('studentIds').optional().isArray(),
+    body('studentIds.*').optional().isString().trim().isLength({ min: 1, max: 50 }),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) throw validationErrorHandler(errors);
     
-    const created = await ResearchArea.create({
-      ...req.body,
-      createdBy: req.user.id,
-    });
+    // Prepare data for creation, ensuring studentIds is properly formatted
+    const researchAreaData = { ...req.body };
+    researchAreaData.createdBy = req.user.id;
+    
+    // Normalize studentIds if provided
+    if (researchAreaData.studentIds !== undefined) {
+      researchAreaData.studentIds = Array.isArray(researchAreaData.studentIds)
+        ? researchAreaData.studentIds.filter(id => id && typeof id === 'string').map(id => id.trim()).filter(id => id.length > 0)
+        : [];
+    }
+    
+    const created = await ResearchArea.create(researchAreaData);
+    
+    // Calculate memberCount after creation
+    await created.calculateMemberCount();
+    await created.save();
+    
+    // Convert to object and explicitly include studentIds
+    const createdObj = created.toObject();
+    createdObj.studentIds = created.studentIds || [];
     
     res.status(201).json({
       success: true,
       message: 'Research area created',
-      data: { item: created },
+      data: { item: createdObj },
     });
   })
 );
@@ -118,18 +206,38 @@ router.put(
     const errors = validationResult(req);
     if (!errors.isEmpty()) throw validationErrorHandler(errors);
     
-    const updated = await ResearchArea.findByIdAndUpdate(
-      req.params.id,
-      { ...req.body, lastUpdatedBy: req.user.id },
-      { new: true, runValidators: true }
-    ).select('-__v');
+    // Find existing research area
+    const existing = await ResearchArea.findById(req.params.id);
+    if (!existing) throw notFoundErrorHandler('Research Area');
     
+    // Update the existing document
+    Object.assign(existing, req.body);
+    existing.lastUpdatedBy = req.user.id;
+    
+    // Explicitly ensure studentIds are set if provided (even if empty array or null)
+    // This must be done AFTER Object.assign to ensure it's not overwritten
+    if (req.body.studentIds !== undefined) {
+      const normalizedStudentIds = Array.isArray(req.body.studentIds) 
+        ? req.body.studentIds.filter(id => id && typeof id === 'string').map(id => String(id).trim()).filter(id => id.length > 0)
+        : [];
+      existing.set('studentIds', normalizedStudentIds);
+    }
+    
+    // Save the document (pre-save hook will calculate memberCount)
+    await existing.save();
+    
+    // Fetch the updated document to ensure all fields are included
+    const updated = await ResearchArea.findById(req.params.id).select('-__v');
     if (!updated) throw notFoundErrorHandler('Research Area');
+    
+    // Convert to object and explicitly include studentIds
+    const updatedObj = updated.toObject();
+    updatedObj.studentIds = Array.isArray(updated.studentIds) ? updated.studentIds : [];
     
     res.json({
       success: true,
       message: 'Research area updated',
-      data: { item: updated },
+      data: { item: updatedObj },
     });
   })
 );
@@ -150,19 +258,6 @@ router.delete(
     res.json({
       success: true,
       message: 'Research area deleted',
-    });
-  })
-);
-
-// GET /api/research-areas/categories - List all categories (public)
-router.get(
-  '/categories',
-  optionalAuth,
-  asyncHandler(async (req, res) => {
-    const categories = await ResearchArea.distinct('category', { isActive: true });
-    res.json({
-      success: true,
-      data: { categories: categories.sort() },
     });
   })
 );

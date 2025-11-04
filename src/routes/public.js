@@ -5,6 +5,7 @@ const Project = require('../models/Project');
 const News = require('../models/News');
 const User = require('../models/User');
 const Workshop = require('../models/Workshop');
+const Event = require('../models/Event');
 const ResearchArea = require('../models/ResearchArea');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { getRedisClient } = require('../config/redis');
@@ -204,7 +205,22 @@ router.get(
         }),
         
         // Workshops conducted (completed workshops)
-        Workshop.countDocuments({ status: 'completed' })
+        // Count both:
+        // 1. Workshops from Workshop model (status: 'completed')
+        // 2. Events with type 'workshop' (status: 'completed')
+        Promise.all([
+          Workshop.countDocuments({ status: 'completed' }),
+          Event.countDocuments({ type: 'workshop', status: 'completed' })
+        ]).then(([workshopCount, eventWorkshopCount]) => {
+          const total = workshopCount + eventWorkshopCount;
+          // Log for debugging
+          console.log(`[Impact Metrics] Workshops: ${workshopCount} from Workshop model, ${eventWorkshopCount} from Event model, Total: ${total}`);
+          return total;
+        }).catch((error) => {
+          console.error('[Impact Metrics] Error counting workshops:', error);
+          // Fallback to just Workshop count if Event query fails
+          return Workshop.countDocuments({ status: 'completed' });
+        })
       ]);
 
       const payload = {
@@ -498,7 +514,98 @@ router.get('/team-directory', asyncHandler(async (req, res) => {
   }
 }));
 
-// Shortcut endpoints
+// GET /api/public/team-members/:id - Get team member details by ID (public)
+// MUST be defined BEFORE /team-members route to avoid route conflicts
+router.get(
+  '/team-members/:id',
+  asyncHandler(async (req, res) => {
+    // Check database connection first
+    const dbError = checkDatabaseConnection();
+    if (dbError) {
+      return res.status(503).json({
+        ...dbError,
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        method: req.method
+      });
+    }
+
+    const { id } = req.params;
+
+    // Validate ID format (MongoDB ObjectId is 24 hex characters)
+    if (!id || !/^[0-9a-fA-F]{24}$/.test(id)) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'Invalid team member ID format',
+          code: 'INVALID_ID'
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        method: req.method
+      });
+    }
+
+    try {
+      // Find user by ID, must be active team_member
+      const user = await User.findOne({
+        _id: id,
+        isActive: true,
+        role: 'team_member'
+      }).select(publicUserProjection);
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            message: 'Team member not found or not available',
+            code: 'TEAM_MEMBER_NOT_FOUND'
+          },
+          timestamp: new Date().toISOString(),
+          path: req.path,
+          method: req.method
+        });
+      }
+
+      // Map to public user format with email forced to be included
+      const publicUser = mapPublicUser(user, { forceIncludeEmail: true });
+
+      res.json({
+        success: true,
+        data: {
+          item: publicUser
+        }
+      });
+    } catch (error) {
+      // Handle invalid ObjectId format
+      if (error.name === 'CastError' || error.kind === 'ObjectId') {
+        return res.status(400).json({
+          success: false,
+          error: {
+            message: 'Invalid team member ID format',
+            code: 'INVALID_ID'
+          },
+          timestamp: new Date().toISOString(),
+          path: req.path,
+          method: req.method
+        });
+      }
+
+      res.status(500).json({
+        success: false,
+        error: {
+          message: 'Database operation failed',
+          details: error.message
+        },
+        timestamp: new Date().toISOString(),
+        path: req.path,
+        method: req.method
+      });
+    }
+  })
+);
+
+// Shortcut endpoints (must be AFTER /team-members/:id)
 router.get('/team-members', getPeopleByRole('team_member'));
 router.get('/mentors', getPeopleByRole('mentor'));
 router.get('/researchers', getPeopleByRole('researcher'));
