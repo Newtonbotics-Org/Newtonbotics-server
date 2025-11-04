@@ -241,6 +241,25 @@ router.post(
     body('featureOptions.showInNav').optional().isBoolean().toBoolean(),
     body('featureOptions.navLabel').optional({ checkFalsy: true }).isString().isLength({ min: 2, max: 50 }),
     body('featureOptions.navOrder').optional().isInt({ min: 0 }).toInt(),
+    // sampleLinks validation (accept array or single object; coerce to array)
+    body('sampleLinks')
+      .optional()
+      .custom((value, { req }) => {
+        if (value === null || value === undefined) return true;
+        if (Array.isArray(value)) return true;
+        if (typeof value === 'object') {
+          req.body.sampleLinks = [value];
+          return true;
+        }
+        throw new Error('sampleLinks must be an array of objects or a single object');
+      }),
+    body('sampleLinks.*.label').optional().isString().isLength({ min: 1, max: 100 }),
+    body('sampleLinks.*.url')
+      .optional()
+      .isString()
+      .isLength({ max: 500 })
+      .matches(/^https?:\/\/.+/i)
+      .withMessage('Each sample link url must be a valid http(s) URL'),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -385,6 +404,25 @@ router.put('/:id', verifyToken, requireMentor, [
   body('featureOptions.showInNav').optional().isBoolean().toBoolean(),
   body('featureOptions.navLabel').optional({ checkFalsy: true }).isString().isLength({ min: 2, max: 50 }),
   body('featureOptions.navOrder').optional().isInt({ min: 0 }).toInt(),
+  // sampleLinks validation (accept array or single object; coerce to array)
+  body('sampleLinks')
+    .optional()
+    .custom((value, { req }) => {
+      if (value === null || value === undefined) return true;
+      if (Array.isArray(value)) return true;
+      if (typeof value === 'object') {
+        req.body.sampleLinks = [value];
+        return true;
+      }
+      throw new Error('sampleLinks must be an array of objects or a single object');
+    }),
+  body('sampleLinks.*.label').optional().isString().isLength({ min: 1, max: 100 }),
+  body('sampleLinks.*.url')
+    .optional()
+    .isString()
+    .isLength({ max: 500 })
+    .matches(/^https?:\/\/.+/i)
+    .withMessage('Each sample link url must be a valid http(s) URL'),
 ], asyncHandler(async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) throw validationErrorHandler(errors);
@@ -491,6 +529,10 @@ router.put('/:id', verifyToken, requireMentor, [
   }
   if (req.body.endTime !== undefined) {
     existing.set('endTime', req.body.endTime);
+  }
+  // Explicitly ensure sampleLinks is set if provided
+  if (req.body.sampleLinks !== undefined) {
+    existing.set('sampleLinks', req.body.sampleLinks);
   }
   
   // If preserving cancelled status, set it explicitly

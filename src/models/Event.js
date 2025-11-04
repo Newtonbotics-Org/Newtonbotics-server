@@ -54,6 +54,28 @@ const eventSchema = new mongoose.Schema(
     organizerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     status: { type: String, enum: ['upcoming', 'ongoing', 'completed', 'cancelled'], default: 'upcoming' },
     requiresRegistration: { type: Boolean, default: false },
+    // Sample resource links such as practice questions, docs, etc.
+    sampleLinks: [
+      new mongoose.Schema(
+        {
+          label: { type: String, required: true, trim: true, maxlength: 100 },
+          url: {
+            type: String,
+            required: true,
+            trim: true,
+            maxlength: 500,
+            validate: {
+              validator: function(value) {
+                const urlPattern = /^https?:\/\/.+/i;
+                return urlPattern.test(value);
+              },
+              message: 'Each sample link must be a valid URL starting with http or https'
+            }
+          }
+        },
+        { _id: false }
+      )
+    ],
     registrationFormLink: { 
       type: String, 
       maxlength: 500, 
