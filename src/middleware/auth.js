@@ -53,6 +53,7 @@ const verifyToken = async (req, res, next) => {
       firstName: user.firstName,
       lastName: user.lastName,
       permissions: user.permissions || [],
+      subroles: user.subroles || [],
     };
 
     // Log successful authentication
@@ -109,6 +110,7 @@ const optionalAuth = async (req, res, next) => {
         firstName: user.firstName,
         lastName: user.lastName,
         permissions: user.permissions || [],
+        subroles: user.subroles || [],
       };
     }
 
