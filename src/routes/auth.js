@@ -911,9 +911,13 @@ router.get('/verify-email/:token', asyncHandler(async (req, res) => {
 // @route   GET /api/auth/me
 // @desc    Get current user info
 // @access  Private
-router.get('/me', asyncHandler(async (req, res) => {
+router.get('/me', verifyToken, asyncHandler(async (req, res) => {
   // User info is already attached by auth middleware
   const user = req.user;
+
+  if (!user) {
+    throw authenticationErrorHandler('Authentication required. Please log in.');
+  }
 
   // Get full user data from database
   const fullUser = await User.findById(user.id).select('-passwordHash');
