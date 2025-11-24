@@ -1,7 +1,7 @@
 const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const router = express.Router();
-const { optionalAuth, verifyToken, requireTeamMember, requireMentor, requireAdmin } = require('../middleware/auth');
+const { optionalAuth, verifyToken, requireTeamMember, requireMentor, requireAdmin, requireProjectLeaderOrOwner } = require('../middleware/auth');
 const Media = require('../models/Media');
 const MediaCategory = require('../models/MediaCategory');
 const MediaCollection = require('../models/MediaCollection');
@@ -104,7 +104,7 @@ router.post(
 router.post(
   '/',
   verifyToken,
-  requireTeamMember,
+  requireProjectLeaderOrOwner, // Allow project leaders to create media
   [
     body('title').isString().isLength({ min: 2, max: 255 }),
     body('fileUrl').isString(),
@@ -114,18 +114,20 @@ router.post(
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) throw validationErrorHandler(errors);
-    const created = await Media.create(req.body);
+    // Ensure uploadedBy matches the authenticated user
+    const mediaData = { ...req.body, uploadedBy: req.user.id };
+    const created = await Media.create(mediaData);
     res.status(201).json({ success: true, message: 'Media created', data: { item: created } });
   })
 );
 
-router.put('/:id', verifyToken, requireTeamMember, [param('id').isString()], asyncHandler(async (req, res) => {
+router.put('/:id', verifyToken, requireProjectLeaderOrOwner, [param('id').isString()], asyncHandler(async (req, res) => {
   const updated = await Media.findByIdAndUpdate(req.params.id, req.body, { new: true });
   if (!updated) throw notFoundErrorHandler('Media');
   res.json({ success: true, message: 'Media updated', data: { item: updated } });
 }));
 
-router.delete('/:id', verifyToken, requireMentor, [param('id').isString()], asyncHandler(async (req, res) => {
+router.delete('/:id', verifyToken, requireProjectLeaderOrOwner, [param('id').isString()], asyncHandler(async (req, res) => {
   const deleted = await Media.findByIdAndDelete(req.params.id);
   if (!deleted) throw notFoundErrorHandler('Media');
   res.json({ success: true, message: 'Media deleted' });
