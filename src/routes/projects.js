@@ -12,6 +12,7 @@ const {
 } = require('../middleware/auth');
 const { asyncHandler, validationErrorHandler, notFoundErrorHandler } = require('../middleware/errorHandler');
 const Project = require('../models/Project');
+const User = require('../models/User');
 const { sendProjectCreatedNotification, sendProjectStatusChangedEmail } = require('../services/emailService');
 const logger = require('../utils/logger');
 
@@ -230,12 +231,45 @@ router.put(
     if (!objId) throw notFoundErrorHandler('Project');
 
     const updateData = { ...req.body };
-    if (updateData.mentorId) updateData.mentorId = ensureObjectId(updateData.mentorId);
-    // Team leader cannot be changed via this endpoint for now
-    delete updateData.teamLeaderId;
+    if (updateData.mentorId) {
+      updateData.mentorId = ensureObjectId(updateData.mentorId);
+    }
 
-    // Compare status before update for notification
+    // Load current project before mutating for permission checks and notifications
     const before = await Project.findById(objId);
+
+    if (!before) throw notFoundErrorHandler('Project');
+
+    let teamLeaderChanged = false;
+    if (Object.prototype.hasOwnProperty.call(updateData, 'teamLeaderId')) {
+      const normalizedLeaderId = ensureObjectId(updateData.teamLeaderId);
+      if (!normalizedLeaderId) {
+        return res.status(400).json({ success: false, message: 'Invalid teamLeaderId' });
+      }
+
+      const isAdmin = req.user.role === 'admin';
+      const isMentor = before.mentorId?.toString() === req.user.id;
+      const isCurrentLeader = before.teamLeaderId?.toString() === req.user.id;
+      if (!isAdmin && !isMentor && !isCurrentLeader) {
+        return res.status(403).json({ success: false, message: 'Only admin, mentor, or current team leader can reassign team leader' });
+      }
+
+      const newLeader = await User.findById(normalizedLeaderId);
+      if (!newLeader) {
+        return res.status(404).json({ success: false, message: 'New team leader not found' });
+      }
+      if (!newLeader.isActive) {
+        return res.status(400).json({ success: false, message: 'New team leader must be an active user' });
+      }
+      if (!['team_member', 'mentor', 'researcher', 'admin'].includes(newLeader.role)) {
+        return res.status(400).json({ success: false, message: 'New team leader must have an eligible role' });
+      }
+
+      const currentLeaderId = before.teamLeaderId?.toString();
+      teamLeaderChanged = currentLeaderId !== normalizedLeaderId.toString();
+      updateData.teamLeaderId = normalizedLeaderId;
+    }
+
     const project = await Project.findByIdAndUpdate(objId, updateData, { new: true })
       .populate('mentorId', 'firstName lastName email role')
       .populate('teamLeaderId', 'firstName lastName email role')
@@ -245,6 +279,15 @@ router.put(
       const recipients = [project?.mentorId?.email, project?.teamLeaderId?.email].filter(Boolean);
       try { await sendProjectStatusChangedEmail({ project: project.toObject(), oldStatus: before.status, newStatus: updateData.status, recipients }); } catch (_) {}
     }
+    if (teamLeaderChanged) {
+      logger.info('Project team leader updated', {
+        projectId: project._id,
+        previousLeaderId: before.teamLeaderId,
+        newLeaderId: project.teamLeaderId,
+        updatedBy: req.user.id,
+      });
+    }
+
     res.json({ success: true, message: 'Project updated', data: { project } });
   })
 );
