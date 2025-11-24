@@ -1,5 +1,6 @@
 const express = require('express');
 const { query, validationResult } = require('express-validator');
+const mongoose = require('mongoose');
 const router = express.Router();
 const { verifyToken, requireAdmin } = require('../middleware/auth');
 const { asyncHandler, validationErrorHandler } = require('../middleware/errorHandler');
@@ -154,8 +155,10 @@ router.get('/notifications', verifyToken, requireAdmin, [
   const { limit = 20, skip = 0, type, priority, read } = req.query;
   
   const options = { limit, skip, type, priority, read };
-  const notifications = await Notification.getUserNotifications(req.user.id, options);
-  const stats = await Notification.getNotificationStats(req.user.id);
+  // Ensure userId is converted to ObjectId if it's a string
+  const userId = typeof req.user.id === 'string' ? new mongoose.Types.ObjectId(req.user.id) : req.user.id;
+  const notifications = await Notification.getUserNotifications(userId, options);
+  const stats = await Notification.getNotificationStats(userId);
   
   res.json({
     success: true,
@@ -204,8 +207,10 @@ router.put('/notifications/:id/read', verifyToken, requireAdmin, asyncHandler(as
 // @desc    Mark all notifications as read
 // @access  Private (Admin)
 router.put('/notifications/read-all', verifyToken, requireAdmin, asyncHandler(async (req, res) => {
+  // Ensure userId is converted to ObjectId if it's a string
+  const userId = typeof req.user.id === 'string' ? new mongoose.Types.ObjectId(req.user.id) : req.user.id;
   const result = await Notification.updateMany(
-    { userId: req.user.id, read: false },
+    { userId, read: false },
     { read: true, readAt: new Date() }
   );
   
@@ -220,7 +225,9 @@ router.put('/notifications/read-all', verifyToken, requireAdmin, asyncHandler(as
 // @desc    Get admin notification settings
 // @access  Private (Admin)
 router.get('/settings', verifyToken, requireAdmin, asyncHandler(async (req, res) => {
-  const settings = await NotificationSettings.getOrCreateSettings(req.user.id);
+  // Ensure userId is converted to ObjectId if it's a string
+  const userId = typeof req.user.id === 'string' ? new mongoose.Types.ObjectId(req.user.id) : req.user.id;
+  const settings = await NotificationSettings.getOrCreateSettings(userId);
   
   res.json({
     success: true,
@@ -232,7 +239,9 @@ router.get('/settings', verifyToken, requireAdmin, asyncHandler(async (req, res)
 // @desc    Update admin notification settings
 // @access  Private (Admin)
 router.put('/settings', verifyToken, requireAdmin, asyncHandler(async (req, res) => {
-  const settings = await NotificationSettings.getOrCreateSettings(req.user.id);
+  // Ensure userId is converted to ObjectId if it's a string
+  const userId = typeof req.user.id === 'string' ? new mongoose.Types.ObjectId(req.user.id) : req.user.id;
+  const settings = await NotificationSettings.getOrCreateSettings(userId);
   
   await settings.updateSettings(req.body);
   

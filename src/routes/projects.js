@@ -9,6 +9,7 @@ const {
   requireMentor,
   requireAdmin,
   requireProjectTeamMember,
+  requireProjectLeaderAccess,
 } = require('../middleware/auth');
 const { asyncHandler, validationErrorHandler, notFoundErrorHandler } = require('../middleware/errorHandler');
 const Project = require('../models/Project');
@@ -204,10 +205,11 @@ router.post(
 );
 
 // PUT /api/projects/:id - update core fields
+// Project leaders (team members who are leaders) can fully manage their projects including images
 router.put(
   '/:id',
   verifyToken,
-  requireProjectTeamMember,
+  requireProjectLeaderAccess,
   [
     param('id').isString(),
     body('title').optional().isString().isLength({ min: 3, max: 255 }),
@@ -222,6 +224,8 @@ router.put(
     body('videoUrl').optional().isString(),
     body('githubUrl').optional().isString(),
     body('documentationUrl').optional().isString(),
+    body('achievements').optional().isArray(),
+    body('tags').optional().isArray(),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -248,8 +252,9 @@ router.put(
       }
 
       const isAdmin = req.user.role === 'admin';
-      const isMentor = before.mentorId?.toString() === req.user.id;
-      const isCurrentLeader = before.teamLeaderId?.toString() === req.user.id;
+      const isMentor = before.mentorId?.toString() === req.user.id.toString();
+      const isCurrentLeader = before.teamLeaderId?.toString() === req.user.id.toString();
+      // Project leaders (team members who are leaders) can reassign team leader
       if (!isAdmin && !isMentor && !isCurrentLeader) {
         return res.status(403).json({ success: false, message: 'Only admin, mentor, or current team leader can reassign team leader' });
       }
@@ -292,11 +297,92 @@ router.put(
   })
 );
 
-// DELETE /api/projects/:id - delete (mentor+)
+// PUT /api/projects/:id/media - update project media (project leaders, mentors, or admins)
+// Dedicated endpoint for updating media URLs
+router.put(
+  '/:id/media',
+  verifyToken,
+  requireProjectLeaderAccess,
+  [
+    param('id').isString(),
+    body('imageUrl').optional().isString().matches(/^https?:\/\/.+\.(jpg|jpeg|png|gif|webp)$/i).withMessage('Image must be a valid image URL'),
+    body('videoUrl').optional().isString().matches(/^https?:\/\/(www\.)?(youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com)\/.+/i).withMessage('Video must be a valid video platform URL'),
+    body('githubUrl').optional().isString().matches(/^https?:\/\/(www\.)?github\.com\/.+/i).withMessage('GitHub URL must be a valid GitHub repository URL'),
+    body('documentationUrl').optional().isString().matches(/^https?:\/\/.+/i).withMessage('Documentation must be a valid URL'),
+  ],
+  asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) throw validationErrorHandler(errors);
+    
+    const { id } = req.params;
+    const objId = ensureObjectId(id);
+    if (!objId) throw notFoundErrorHandler('Project');
+
+    const project = await Project.findById(objId);
+    if (!project) throw notFoundErrorHandler('Project');
+
+    // Only allow updating media fields
+    const mediaFields = ['imageUrl', 'videoUrl', 'githubUrl', 'documentationUrl'];
+    const updateData = {};
+    
+    mediaFields.forEach(field => {
+      if (req.body[field] !== undefined) {
+        updateData[field] = req.body[field];
+      }
+    });
+
+    // If all fields are empty strings, treat as clearing the field
+    Object.keys(updateData).forEach(key => {
+      if (updateData[key] === '') {
+        updateData[key] = null;
+      }
+    });
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No media fields provided for update'
+      });
+    }
+
+    // Update only media fields
+    Object.assign(project, updateData);
+    await project.save();
+
+    // Populate and return updated project
+    const updated = await Project.findById(project._id)
+      .populate('mentorId', 'firstName lastName email role')
+      .populate('teamLeaderId', 'firstName lastName email role')
+      .populate('teamMembers.userId', 'firstName lastName email role profileImageUrl');
+
+    logger.info('Project media updated', {
+      projectId: project._id,
+      projectTitle: project.title,
+      updatedFields: Object.keys(updateData),
+      updatedBy: req.user.id,
+      updatedByEmail: req.user.email
+    });
+
+    res.json({
+      success: true,
+      message: 'Project media updated successfully',
+      data: {
+        project: updated,
+        media: {
+          imageUrl: updated.imageUrl,
+          videoUrl: updated.videoUrl,
+          githubUrl: updated.githubUrl,
+          documentationUrl: updated.documentationUrl
+        }
+      }
+    });
+  })
+);
+
+// DELETE /api/projects/:id - delete (project leaders, mentors, or admins)
 router.delete(
   '/:id',
   verifyToken,
-  requireMentor,
   [param('id').isString()],
   asyncHandler(async (req, res) => {
     const { id } = req.params;
@@ -307,12 +393,29 @@ router.delete(
     const project = await Project.findById(objId);
     if (!project) throw notFoundErrorHandler('Project');
     
+    // Check permissions: admin, mentor, or project leader can delete
+    const isAdmin = req.user.role === 'admin';
+    const isMentor = ['mentor', 'researcher'].includes(req.user.role);
+    const isProjectLeader = project.teamLeaderId?.toString() === req.user.id.toString();
+    
+    if (!isAdmin && !isMentor && !isProjectLeader) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          message: 'Access denied. Only project leaders, mentors, or admins can delete projects.',
+          statusCode: 403
+        }
+      });
+    }
+    
     // Log the deletion for audit purposes
-    logger.info(`Project deleted by admin/mentor`, {
+    const deletedBy = isProjectLeader ? 'team_leader' : (isAdmin ? 'admin' : 'mentor');
+    logger.info(`Project deleted by ${deletedBy}`, {
       projectId: id,
       projectTitle: project.title,
       deletedBy: req.user.id,
       deletedByEmail: req.user.email,
+      deletedByRole: req.user.role,
       deletedAt: new Date().toISOString()
     });
     
@@ -355,7 +458,7 @@ router.delete(
     if (!project) throw notFoundErrorHandler('Project');
     
     // Check if user is the team leader of this project
-    if (project.teamLeaderId?.toString() !== req.user.id) {
+    if (project.teamLeaderId?.toString() !== req.user.id.toString()) {
       return res.status(403).json({
         success: false,
         error: {
@@ -440,10 +543,11 @@ router.get(
   })
 );
 
-// POST /api/projects/:id/members - only team leader, mentor or admin can add
+// POST /api/projects/:id/members - project leaders (team members who are leaders) can add members
 router.post(
   '/:id/members',
   verifyToken,
+  requireProjectLeaderAccess,
   [param('id').isString(), body('userId').isString(), body('role').isString().isLength({ min: 2, max: 100 })],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -453,12 +557,8 @@ router.post(
     const project = await Project.findById(objId);
     if (!project) throw notFoundErrorHandler('Project');
 
-    const isLeader = project.teamLeaderId?.toString() === req.user.id;
-    const isMentor = project.mentorId?.toString() === req.user.id;
-    const isAdmin = req.user.role === 'admin';
-    if (!isLeader && !isMentor && !isAdmin) {
-      return res.status(403).json({ success: false, message: 'Only team leader, mentor, or admin can add members' });
-    }
+    // Project leaders (team members who are leaders) can add members
+    // This is already checked by requireProjectLeaderAccess middleware
 
     const newMemberUserId = ensureObjectId(req.body.userId);
     if (!newMemberUserId) throw validationErrorHandler({ array: () => [{ msg: 'Invalid userId' }] });
@@ -470,6 +570,7 @@ router.post(
 );
 
 // PUT/PATCH /api/projects/:id/members/:memberId - update member by membershipId or userId
+// Project leaders (team members who are leaders) can update members
 const updateMemberHandler = async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) throw validationErrorHandler(errors);
@@ -480,12 +581,8 @@ const updateMemberHandler = async (req, res) => {
   const project = await Project.findById(objId);
   if (!project) throw notFoundErrorHandler('Project');
 
-  const isLeader = project.teamLeaderId?.toString() === req.user.id;
-  const isMentor = project.mentorId?.toString() === req.user.id;
-  const isAdmin = req.user.role === 'admin';
-  if (!isLeader && !isMentor && !isAdmin) {
-    return res.status(403).json({ success: false, message: 'Only team leader, mentor, or admin can update members' });
-  }
+  // Project leaders (team members who are leaders) can update members
+  // This is already checked by requireProjectLeaderAccess middleware
 
   const updates = req.body || {};
   const allowed = ['role', 'skills', 'responsibilities', 'isActive'];
@@ -530,6 +627,7 @@ const updateMemberHandler = async (req, res) => {
 router.put(
   '/:id/members/:memberId',
   verifyToken,
+  requireProjectLeaderAccess,
   [param('id').isString(), param('memberId').isString()],
   asyncHandler(updateMemberHandler)
 );
@@ -537,11 +635,13 @@ router.put(
 router.patch(
   '/:id/members/:memberId',
   verifyToken,
+  requireProjectLeaderAccess,
   [param('id').isString(), param('memberId').isString()],
   asyncHandler(updateMemberHandler)
 );
 
 // PUT/PATCH /api/projects/:id/members with body { userId, ... }
+// Project leaders (team members who are leaders) can update members
 const updateMemberByBodyHandler = async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) throw validationErrorHandler(errors);
@@ -551,12 +651,8 @@ const updateMemberByBodyHandler = async (req, res) => {
   const project = await Project.findById(objId);
   if (!project) throw notFoundErrorHandler('Project');
 
-  const isLeader = project.teamLeaderId?.toString() === req.user.id;
-  const isMentor = project.mentorId?.toString() === req.user.id;
-  const isAdmin = req.user.role === 'admin';
-  if (!isLeader && !isMentor && !isAdmin) {
-    return res.status(403).json({ success: false, message: 'Only team leader, mentor, or admin can update members' });
-  }
+  // Project leaders (team members who are leaders) can update members
+  // This is already checked by requireProjectLeaderAccess middleware
 
   const userIdObj = ensureObjectId(req.body.userId);
   if (!userIdObj) return res.status(400).json({ success: false, message: 'Invalid userId' });
@@ -586,6 +682,7 @@ const updateMemberByBodyHandler = async (req, res) => {
 router.put(
   '/:id/members',
   verifyToken,
+  requireProjectLeaderAccess,
   [param('id').isString(), body('userId').isString()],
   asyncHandler(updateMemberByBodyHandler)
 );
@@ -593,14 +690,17 @@ router.put(
 router.patch(
   '/:id/members',
   verifyToken,
+  requireProjectLeaderAccess,
   [param('id').isString(), body('userId').isString()],
   asyncHandler(updateMemberByBodyHandler)
 );
 
 // DELETE /api/projects/:id/members/:memberId - memberId is userId
+// Project leaders (team members who are leaders) can remove members
 router.delete(
   '/:id/members/:memberId',
   verifyToken,
+  requireProjectLeaderAccess,
   [param('id').isString(), param('memberId').isString()],
   asyncHandler(async (req, res) => {
     const objId = ensureObjectId(req.params.id);
@@ -609,12 +709,8 @@ router.delete(
     const project = await Project.findById(objId);
     if (!project) throw notFoundErrorHandler('Project');
 
-    const isLeader = project.teamLeaderId?.toString() === req.user.id;
-    const isMentor = project.mentorId?.toString() === req.user.id;
-    const isAdmin = req.user.role === 'admin';
-    if (!isLeader && !isMentor && !isAdmin) {
-      return res.status(403).json({ success: false, message: 'Only team leader, mentor, or admin can remove members' });
-    }
+    // Project leaders (team members who are leaders) can remove members
+    // This is already checked by requireProjectLeaderAccess middleware
 
     const memberParam = req.params.memberId;
     const asObjectId = ensureObjectId(memberParam);

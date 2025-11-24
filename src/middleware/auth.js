@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { getRedisClient } = require('../config/redis');
 const User = require('../models/User');
+const Subrole = require('../models/Subrole');
 const logger = require('../utils/logger');
 const { 
   authenticationErrorHandler, 
@@ -45,6 +46,29 @@ const verifyToken = async (req, res, next) => {
       return next(authenticationErrorHandler('User account is deactivated'));
     }
 
+    // Merge subrole permissions with user permissions
+    let allPermissions = [...(user.permissions || [])];
+    if (user.subroles && user.subroles.length > 0) {
+      try {
+        const subroles = await Subrole.find({ 
+          name: { $in: user.subroles },
+          isActive: true 
+        }).select('permissions');
+        
+        subroles.forEach(subrole => {
+          if (subrole.permissions && Array.isArray(subrole.permissions)) {
+            allPermissions = [...allPermissions, ...subrole.permissions];
+          }
+        });
+        
+        // Remove duplicates
+        allPermissions = [...new Set(allPermissions)];
+      } catch (error) {
+        logger.error('Error fetching subrole permissions:', error);
+        // Continue with user permissions only if subrole fetch fails
+      }
+    }
+
     // Add user info to request
     req.user = {
       id: user._id,
@@ -52,7 +76,7 @@ const verifyToken = async (req, res, next) => {
       role: user.role,
       firstName: user.firstName,
       lastName: user.lastName,
-      permissions: user.permissions || [],
+      permissions: allPermissions,
       subroles: user.subroles || [],
     };
 
@@ -160,8 +184,27 @@ const requirePermission = (...permissions) => {
   };
 };
 
-// Admin only access
-const requireAdmin = requireRole('admin');
+// Admin only access - checks both role and system:admin permission
+const requireAdmin = (req, res, next) => {
+  if (!req.user) {
+    return next(authenticationErrorHandler());
+  }
+
+  // Check if user has admin role
+  const hasAdminRole = req.user.role === 'admin';
+  
+  // Check if user has system:admin permission
+  const userPermissions = req.user.permissions || [];
+  const hasAdminPermission = userPermissions.includes('system:admin');
+
+  if (!hasAdminRole && !hasAdminPermission) {
+    return next(authorizationErrorHandler(
+      'Access denied. Admin role or system:admin permission required.'
+    ));
+  }
+
+  next();
+};
 
 // Mentor or higher access
 const requireMentor = requireRole('mentor', 'researcher', 'admin');
@@ -194,7 +237,7 @@ const requireOwnership = (model, resourceIdField = 'id') => {
 
     // Check if user owns the resource
     const ownershipField = resource.userId ? 'userId' : 'createdBy';
-    if (resource[ownershipField] && resource[ownershipField].toString() === req.user.id) {
+    if (resource[ownershipField] && resource[ownershipField].toString() === req.user.id.toString()) {
       req.resource = resource;
       return next();
     }
@@ -202,7 +245,7 @@ const requireOwnership = (model, resourceIdField = 'id') => {
     // Check if user is a team member (for projects)
     if (resource.teamMembers && Array.isArray(resource.teamMembers)) {
       const isTeamMember = resource.teamMembers.some(member => 
-        member.userId.toString() === req.user.id
+        member.userId.toString() === req.user.id.toString()
       );
       if (isTeamMember) {
         req.resource = resource;
@@ -235,15 +278,15 @@ const requireProjectTeamMember = asyncHandler(async (req, res, next) => {
   }
 
   // Check if user is team leader or mentor
-  if (project.teamLeaderId?.toString() === req.user.id || 
-      project.mentorId?.toString() === req.user.id) {
+  if (project.teamLeaderId?.toString() === req.user.id.toString() || 
+      project.mentorId?.toString() === req.user.id.toString()) {
     req.project = project;
     return next();
   }
 
   // Check if user is a team member
   const isTeamMember = project.teamMembers.some(member => 
-    member.userId.toString() === req.user.id
+    member.userId.toString() === req.user.id.toString()
   );
 
   if (isTeamMember) {
@@ -252,6 +295,96 @@ const requireProjectTeamMember = asyncHandler(async (req, res, next) => {
   }
 
   return next(authorizationErrorHandler('Access denied. You are not a member of this project'));
+});
+
+// Check if user is team member role AND project leader (for full project management)
+const requireProjectLeaderAccess = asyncHandler(async (req, res, next) => {
+  if (!req.user) {
+    return next(authenticationErrorHandler());
+  }
+
+  const projectId = req.params.id || req.params.projectId;
+  const Project = require('../models/Project');
+  const project = await Project.findById(projectId);
+
+  if (!project) {
+    return next(notFoundErrorHandler('Project'));
+  }
+
+  // Admin can access any project
+  if (req.user.role === 'admin') {
+    req.project = project;
+    req.isProjectLeader = true;
+    return next();
+  }
+
+  // Check if user is team member role AND project leader
+  const isTeamMemberRole = req.user.role === 'team_member';
+  const isProjectLeader = project.teamLeaderId?.toString() === req.user.id.toString();
+  
+  if (isTeamMemberRole && isProjectLeader) {
+    req.project = project;
+    req.isProjectLeader = true;
+    return next();
+  }
+
+  // Also allow mentors and researchers who are project leaders
+  if ((req.user.role === 'mentor' || req.user.role === 'researcher') && isProjectLeader) {
+    req.project = project;
+    req.isProjectLeader = true;
+    return next();
+  }
+
+  // If user is mentor of the project, allow access
+  if (project.mentorId?.toString() === req.user.id.toString()) {
+    req.project = project;
+    req.isProjectLeader = false;
+    return next();
+  }
+
+  return next(authorizationErrorHandler('Access denied. You must be a team member and project leader, or a mentor/admin to manage this project'));
+});
+
+// Check if user is a project leader (any project) - for media management
+const requireProjectLeaderOrOwner = asyncHandler(async (req, res, next) => {
+  if (!req.user) {
+    return next(authenticationErrorHandler());
+  }
+
+  // Admin can access anything
+  if (req.user.role === 'admin') {
+    return next();
+  }
+
+  // Mentor/Researcher can access
+  if (['mentor', 'researcher'].includes(req.user.role)) {
+    return next();
+  }
+
+  // For media operations, check if user is the uploader
+  if (req.params.id) {
+    const Media = require('../models/Media');
+    const media = await Media.findById(req.params.id);
+    
+    if (media) {
+      // If user uploaded the media, allow access
+      if (media.uploadedBy?.toString() === req.user.id.toString()) {
+        return next();
+      }
+    }
+  }
+
+  // Check if user is a project leader of any project
+  const Project = require('../models/Project');
+  const isProjectLeader = await Project.findOne({
+    teamLeaderId: req.user.id
+  });
+
+  if (isProjectLeader) {
+    return next();
+  }
+
+  return next(authorizationErrorHandler('Access denied. You must be a project leader, media owner, mentor, or admin to manage media'));
 });
 
 // Workshop instructor check
@@ -275,7 +408,7 @@ const requireWorkshopInstructor = asyncHandler(async (req, res, next) => {
   }
 
   // Check if user is the instructor
-  if (workshop.instructorId.toString() === req.user.id) {
+  if (workshop.instructorId.toString() === req.user.id.toString()) {
     req.workshop = workshop;
     return next();
   }
@@ -308,6 +441,8 @@ module.exports = {
   requireStudent,
   requireOwnership,
   requireProjectTeamMember,
+  requireProjectLeaderAccess,
+  requireProjectLeaderOrOwner,
   requireWorkshopInstructor,
   authRateLimit,
 };

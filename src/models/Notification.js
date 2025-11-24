@@ -207,6 +207,8 @@ notificationSchema.statics.createNotification = async function(data) {
 
 // Static method to get user notifications
 notificationSchema.statics.getUserNotifications = async function(userId, options = {}) {
+  // Ensure userId is converted to ObjectId
+  const userIdObj = userId instanceof mongoose.Types.ObjectId ? userId : new mongoose.Types.ObjectId(userId);
   const {
     limit = 20,
     skip = 0,
@@ -216,7 +218,7 @@ notificationSchema.statics.getUserNotifications = async function(userId, options
     priority = null
   } = options;
   
-  const query = { userId, archived };
+  const query = { userId: userIdObj, archived };
   
   if (read !== null) query.read = read;
   if (type) query.type = type;
@@ -230,36 +232,68 @@ notificationSchema.statics.getUserNotifications = async function(userId, options
 
 // Static method to get notification statistics
 notificationSchema.statics.getNotificationStats = async function(userId) {
-  const stats = await this.aggregate([
-    { $match: { userId: new mongoose.Types.ObjectId(userId), archived: false } },
-    {
-      $group: {
-        _id: null,
-        total: { $sum: 1 },
-        unread: { $sum: { $cond: ['$read', 0, 1] } },
-        read: { $sum: { $cond: ['$read', 1, 0] } },
-        byType: {
-          $push: {
-            type: '$type',
-            count: 1
-          }
-        },
-        byPriority: {
-          $push: {
-            priority: '$priority',
-            count: 1
-          }
+  // Ensure userId is converted to ObjectId
+  const userIdObj = userId instanceof mongoose.Types.ObjectId ? userId : new mongoose.Types.ObjectId(userId);
+  
+  const [baseStats, typeStats, priorityStats] = await Promise.all([
+    // Base statistics
+    this.aggregate([
+      { $match: { userId: userIdObj, archived: false } },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          unread: { $sum: { $cond: [{ $eq: ['$read', false] }, 1, 0] } },
+          read: { $sum: { $cond: [{ $eq: ['$read', true] }, 1, 0] } }
         }
       }
-    }
+    ]),
+    // Statistics by type
+    this.aggregate([
+      { $match: { userId: userIdObj, archived: false } },
+      {
+        $group: {
+          _id: '$type',
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $project: {
+          type: '$_id',
+          count: 1,
+          _id: 0
+        }
+      },
+      { $sort: { count: -1 } }
+    ]),
+    // Statistics by priority
+    this.aggregate([
+      { $match: { userId: userIdObj, archived: false } },
+      {
+        $group: {
+          _id: '$priority',
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $project: {
+          priority: '$_id',
+          count: 1,
+          _id: 0
+        }
+      },
+      { $sort: { count: -1 } }
+    ])
   ]);
   
-  return stats[0] || {
-    total: 0,
-    unread: 0,
-    read: 0,
-    byType: [],
-    byPriority: []
+  const base = baseStats[0] || { total: 0, unread: 0, read: 0 };
+  
+  return {
+    total: base.total || 0,
+    unread: base.unread || 0,
+    read: base.read || 0,
+    byType: typeStats || [],
+    byPriority: priorityStats || []
   };
 };
 

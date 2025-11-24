@@ -349,6 +349,105 @@ router.post('/login', loginValidation, asyncHandler(async (req, res) => {
     ip: req.ip
   });
 
+  // Get all projects where user is involved (as leader, mentor, or member)
+  let projectsInvolvement = {
+    total: 0,
+    ledProjectsCount: 0,
+    mentoredProjectsCount: 0,
+    memberProjectsCount: 0,
+    projects: []
+  };
+
+  try {
+    const Project = require('../models/Project');
+    const userId = user._id;
+
+    // Find all projects where user is involved
+    const [ledProjects, mentoredProjects, memberProjects] = await Promise.all([
+      // Projects where user is team leader
+      Project.find({ teamLeaderId: userId })
+        .select('_id title status category teamLeaderId')
+        .lean(),
+      // Projects where user is mentor
+      Project.find({ mentorId: userId })
+        .select('_id title status category mentorId')
+        .lean(),
+      // Projects where user is a team member
+      Project.find({ 'teamMembers.userId': userId })
+        .select('_id title status category teamMembers')
+        .lean()
+    ]);
+
+    // Process led projects
+    ledProjects.forEach(project => {
+      projectsInvolvement.projects.push({
+        projectId: project._id,
+        title: project.title,
+        status: project.status,
+        category: project.category,
+        role: 'leader',
+        roleDisplay: 'Team Leader'
+      });
+      projectsInvolvement.ledProjectsCount++;
+    });
+
+    // Process mentored projects (avoid duplicates if user is both leader and mentor)
+    mentoredProjects.forEach(project => {
+      const existing = projectsInvolvement.projects.find(p => p.projectId.toString() === project._id.toString());
+      if (!existing) {
+        projectsInvolvement.projects.push({
+          projectId: project._id,
+          title: project.title,
+          status: project.status,
+          category: project.category,
+          role: 'mentor',
+          roleDisplay: 'Mentor'
+        });
+        projectsInvolvement.mentoredProjectsCount++;
+      } else {
+        // User is both leader and mentor
+        existing.role = 'leader_mentor';
+        existing.roleDisplay = 'Team Leader & Mentor';
+      }
+    });
+
+    // Process member projects (avoid duplicates)
+    memberProjects.forEach(project => {
+      const memberInfo = project.teamMembers.find(m => 
+        m.userId && m.userId.toString() === userId.toString()
+      );
+      
+      if (memberInfo) {
+        const existing = projectsInvolvement.projects.find(p => p.projectId.toString() === project._id.toString());
+        if (!existing) {
+          projectsInvolvement.projects.push({
+            projectId: project._id,
+            title: project.title,
+            status: project.status,
+            category: project.category,
+            role: 'member',
+            roleDisplay: memberInfo.role || 'Team Member',
+            memberRole: memberInfo.role || 'Team Member'
+          });
+          projectsInvolvement.memberProjectsCount++;
+        } else {
+          // User has multiple roles in this project
+          if (existing.role === 'leader') {
+            existing.role = 'leader_member';
+            existing.roleDisplay = `Team Leader & ${memberInfo.role || 'Member'}`;
+          } else if (existing.role === 'mentor') {
+            existing.role = 'mentor_member';
+            existing.roleDisplay = `Mentor & ${memberInfo.role || 'Member'}`;
+          }
+        }
+      }
+    });
+
+    projectsInvolvement.total = projectsInvolvement.projects.length;
+  } catch (error) {
+    logger.warn('Failed to fetch project involvement during login:', error);
+  }
+
   // Send response
   res.json({
     success: true,
@@ -360,6 +459,7 @@ router.post('/login', loginValidation, asyncHandler(async (req, res) => {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role,
+        subroles: user.subroles || [],
         studentId: user.studentId,
         department: user.department,
         yearOfStudy: user.yearOfStudy,
@@ -367,7 +467,17 @@ router.post('/login', loginValidation, asyncHandler(async (req, res) => {
         isActive: user.isActive,
         emailVerified: user.emailVerified,
         permissions: user.permissions,
-        lastLogin: user.lastLogin
+        lastLogin: user.lastLogin,
+        // Include project involvement info
+        ...(projectsInvolvement.total > 0 && {
+          projectsInvolvement: {
+            total: projectsInvolvement.total,
+            ledProjectsCount: projectsInvolvement.ledProjectsCount,
+            mentoredProjectsCount: projectsInvolvement.mentoredProjectsCount,
+            memberProjectsCount: projectsInvolvement.memberProjectsCount,
+            projects: projectsInvolvement.projects
+          }
+        })
       },
       tokens: {
         accessToken,
