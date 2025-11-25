@@ -687,7 +687,7 @@ Team leaders can also manage media files through the `/api/media` endpoints. The
 
 **Endpoint:** `GET /api/media/:id`
 
-**Access:** Public (optional authentication)
+**Access:** Public ()
 
 **Response:**
 ```json
