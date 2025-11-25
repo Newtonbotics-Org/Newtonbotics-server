@@ -91,6 +91,9 @@ src/
 - `POST /api/news` - Create news
 - `PUT /api/news/:id` - Update news
 - `DELETE /api/news/:id` - Delete news
+- `POST /api/attendance` - Mark attendance for team members (admin only)
+- `GET /api/attendance` - List attendance with filters (admin only)
+- `GET /api/attendance/mine` - Authenticated user attendance history
 
 ## 🧪 Testing
 
@@ -118,6 +121,7 @@ npm run db:reset
 
 ### Models
 - **User** - Team members, mentors, researchers
+- **Attendance** - Daily attendance records for team members
 - **News** - News articles with application forms
 - **Event** - Workshops, seminars, competitions
 - **Project** - Research projects

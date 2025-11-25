@@ -35,6 +35,7 @@ const roleApprovalRoutes = require('./routes/roleApprovals');
 const researchAreaRoutes = require('./routes/researchAreas');
 const adminDashboardRoutes = require('./routes/adminDashboard');
 const subroleRoutes = require('./routes/subroles');
+const attendanceRoutes = require('./routes/attendance');
 const { default: mongoose } = require('mongoose');
 const ContactSubmission = require('./models/ContactSubmission');
 const User = require('./models/User');
@@ -159,6 +160,7 @@ app.use('/api/role-approvals', roleApprovalRoutes);
 app.use('/api/research-areas', researchAreaRoutes);
 app.use('/api/admin/dashboard', adminDashboardRoutes);
 app.use('/api/subroles', subroleRoutes);
+app.use('/api/attendance', attendanceRoutes);
 
 // Error handling middleware
 app.use(notFoundHandler);
