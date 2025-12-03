@@ -199,6 +199,163 @@ const searchValidation = [
     .withMessage('Skip must be a non-negative integer'),
 ];
 
+// @route   GET /api/users/deactivated
+// @desc    Get all deactivated users (any role, isActive: false)
+// @access  Private (Admin)
+router.get('/deactivated', requireAdmin, asyncHandler(async (req, res) => {
+  const { q, role, department, skills, limit = 50, skip = 0 } = req.query;
+
+  const searchQuery = {
+    isActive: false,
+  };
+
+  if (q) {
+    searchQuery.$text = { $search: q };
+  }
+
+  if (role) {
+    searchQuery.role = role;
+  }
+
+  if (department) {
+    searchQuery.department = department;
+  }
+
+  if (skills && skills.length > 0) {
+    searchQuery.skills = { $in: skills };
+  }
+
+  const users = await User.find(searchQuery)
+    .select('-passwordHash')
+    .limit(parseInt(limit, 10))
+    .skip(parseInt(skip, 10))
+    .sort({ role: 1, firstName: 1, lastName: 1 });
+
+  const total = await User.countDocuments(searchQuery);
+
+  logger.info(`Deactivated users search performed by ${req.user.id}`, {
+    query: q,
+    filters: { role, department, skills },
+    results: users.length,
+    total,
+  });
+
+  res.json({
+    success: true,
+    data: {
+      users: users.map(user => ({
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        fullName: user.fullName,
+        displayName: user.displayName,
+        role: user.role,
+        subroles: user.subroles || [],
+        specialization: user.specialization,
+        experienceYears: user.experienceYears,
+        department: user.department,
+        yearOfStudy: user.yearOfStudy,
+        phone: user.phone,
+        profileImageUrl: user.profileImageUrl,
+        bio: user.bio,
+        skills: user.skills || [],
+        achievements: user.achievements || [],
+        socialLinks: user.socialLinks || {},
+        currentProjects: user.currentProjects || [],
+        emailVerified: user.emailVerified,
+        lastLogin: user.lastLogin,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+        isActive: user.isActive,
+      })),
+      pagination: {
+        total,
+        limit: parseInt(limit, 10),
+        skip: parseInt(skip, 10),
+        hasMore: total > parseInt(skip, 10) + users.length,
+      },
+    },
+  });
+}));
+
+// @route   GET /api/users/deactivated/team-members
+// @desc    Get all deactivated team members (role: team_member, isActive: false)
+// @access  Private (Admin)
+router.get('/deactivated/team-members', requireAdmin, asyncHandler(async (req, res) => {
+  const { q, department, skills, limit = 50, skip = 0 } = req.query;
+
+  const searchQuery = {
+    isActive: false,
+    role: 'team_member',
+  };
+
+  if (q) {
+    searchQuery.$text = { $search: q };
+  }
+
+  if (department) {
+    searchQuery.department = department;
+  }
+
+  if (skills && skills.length > 0) {
+    searchQuery.skills = { $in: skills };
+  }
+
+  const teamMembers = await User.find(searchQuery)
+    .select('-passwordHash')
+    .limit(parseInt(limit, 10))
+    .skip(parseInt(skip, 10))
+    .sort({ firstName: 1, lastName: 1 });
+
+  const total = await User.countDocuments(searchQuery);
+
+  logger.info(`Deactivated team members search performed by ${req.user.id}`, {
+    query: q,
+    filters: { department, skills },
+    results: teamMembers.length,
+    total,
+  });
+
+  res.json({
+    success: true,
+    data: {
+      teamMembers: teamMembers.map(user => ({
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        fullName: user.fullName,
+        displayName: user.displayName,
+        role: user.role,
+        subroles: user.subroles || [],
+        specialization: user.specialization,
+        experienceYears: user.experienceYears,
+        department: user.department,
+        yearOfStudy: user.yearOfStudy,
+        phone: user.phone,
+        profileImageUrl: user.profileImageUrl,
+        bio: user.bio,
+        skills: user.skills || [],
+        achievements: user.achievements || [],
+        socialLinks: user.socialLinks || {},
+        currentProjects: user.currentProjects || [],
+        emailVerified: user.emailVerified,
+        lastLogin: user.lastLogin,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+        isActive: user.isActive,
+      })),
+      pagination: {
+        total,
+        limit: parseInt(limit, 10),
+        skip: parseInt(skip, 10),
+        hasMore: total > parseInt(skip, 10) + teamMembers.length,
+      },
+    },
+  });
+}));
+
 // @route   GET /api/users
 // @desc    Get all users (admin only)
 // @access  Private (Admin)
