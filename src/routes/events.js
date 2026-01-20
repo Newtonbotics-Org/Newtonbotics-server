@@ -138,7 +138,6 @@ router.get(
         }
       });
     } catch (error) {
-      console.error('Navigation API Error:', error);
       res.status(500).json({
         success: false,
         message: 'Failed to fetch navigation items',

@@ -6,6 +6,7 @@ const ProjectRequest = require('../models/ProjectRequest');
 const { sendProjectRequestStatusEmail } = require('../services/emailService');
 const User = require('../models/User');
 const { asyncHandler, validationErrorHandler, notFoundErrorHandler, authorizationErrorHandler } = require('../middleware/errorHandler');
+const { uploadProjectDocument } = require('../utils/upload');
 
 // Project requests routes - allows any authenticated user to submit project ideas
 // - GET /api/project-requests - List project requests
@@ -39,7 +40,12 @@ router.get(
     if (mentorId) filter.mentorId = mentorId;
     if (submittedBy) filter.submittedBy = submittedBy;
     const [items, total] = await Promise.all([
-      ProjectRequest.find(filter).limit(limit).skip(skip).sort({ submittedAt: -1 }),
+      ProjectRequest.find(filter)
+        .populate('submittedBy', 'firstName lastName email role')
+        .populate('mentorId', 'firstName lastName email role')
+        .limit(limit)
+        .skip(skip)
+        .sort({ submittedAt: -1 }),
       ProjectRequest.countDocuments(filter),
     ]);
     res.json({ success: true, data: { items, pagination: { total, limit, skip, hasMore: total > skip + items.length } } });
@@ -149,14 +155,107 @@ router.get('/deleted', verifyToken, requireAdmin, [
 }));
 
 router.get('/:id', [param('id').isString()], asyncHandler(async (req, res) => {
-  const item = await ProjectRequest.findById(req.params.id);
+  const item = await ProjectRequest.findById(req.params.id)
+    .populate('submittedBy', 'firstName lastName email role')
+    .populate('mentorId', 'firstName lastName email role')
+    .populate('teamMembers.userId', 'firstName lastName email role');
   if (!item) throw notFoundErrorHandler('ProjectRequest');
   res.json({ success: true, data: { item } });
+}));
+
+// @route   GET /api/project-requests/:id/document
+// @desc    Download project request document
+// @access  Private (Owner, Mentor, or Admin)
+router.get('/:id/document', verifyToken, [param('id').isString()], asyncHandler(async (req, res) => {
+  const projectRequest = await ProjectRequest.findById(req.params.id);
+  if (!projectRequest) throw notFoundErrorHandler('ProjectRequest');
+  
+  // Check if document exists (support both local files and Cloudinary URLs)
+  if (!projectRequest.document || (!projectRequest.document.path && !projectRequest.document.url && !projectRequest.document.secureUrl && !projectRequest.document.documentUrl)) {
+    return res.status(404).json({
+      success: false,
+      message: 'Document not found for this project request'
+    });
+  }
+  
+  // Check if user is the owner, mentor+, or admin
+  const isOwner = projectRequest.submittedBy.toString() === req.user.id.toString();
+  const isAdmin = req.user.role === 'admin';
+  const isMentorOrHigher = ['mentor', 'researcher', 'admin'].includes(req.user.role);
+  
+  // Admin can always view documents (including approved projects)
+  if (isAdmin) {
+    // Admin has full access - proceed
+  } else {
+    // For non-admin users, check basic permissions
+    if (!isOwner && !isMentorOrHigher) {
+      throw authorizationErrorHandler('Access denied. You can only view documents for your own project requests or need mentor+ privileges');
+    }
+    
+    // For approved projects, additional restrictions for non-admin
+    if (projectRequest.status === 'approved' && !isOwner) {
+      // Allow mentors to view documents of approved projects
+      if (!isMentorOrHigher) {
+        throw authorizationErrorHandler('Access denied. Only administrators, owners, or mentors can view documents of approved projects.');
+      }
+    }
+  }
+  
+  // Handle Cloudinary URL documents - redirect to URL
+  if (projectRequest.document.secureUrl || projectRequest.document.url || projectRequest.document.documentUrl) {
+    const documentUrl = projectRequest.document.secureUrl || projectRequest.document.url || projectRequest.document.documentUrl;
+    return res.redirect(302, documentUrl);
+  }
+  
+  // Handle local file documents
+  if (projectRequest.document.path) {
+    const path = require('path');
+    const fs = require('fs');
+    const filePath = path.join(__dirname, '../../', projectRequest.document.path);
+    
+    // Check if file exists on disk
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        success: false,
+        message: 'Document file not found on server'
+      });
+    }
+    
+    // Send the file
+    res.download(filePath, projectRequest.document.originalName || projectRequest.document.documentName || projectRequest.document.filename, (err) => {
+      if (err) {
+        if (!res.headersSent) {
+          res.status(500).json({
+            success: false,
+            message: 'Error downloading file'
+          });
+        }
+      }
+    });
+  } else {
+    return res.status(404).json({
+      success: false,
+      message: 'Document path or URL not found'
+    });
+  }
 }));
 
 router.post(
   '/',
   verifyToken,
+  (req, res, next) => {
+    // Handle multer errors before validation
+    uploadProjectDocument(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({
+          success: false,
+          message: err.message || 'File upload error',
+          error: err.code === 'LIMIT_FILE_SIZE' ? 'File too large. Maximum size is 10MB.' : err.message
+        });
+      }
+      next();
+    });
+  },
   [
     body('title').isString().isLength({ min: 5, max: 255 }),
     body('description').isString().isLength({ min: 20, max: 5000 }),
@@ -166,7 +265,73 @@ router.post(
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) throw validationErrorHandler(errors);
+    
     const payload = { ...req.body, submittedBy: req.user.id, submittedAt: new Date() };
+    
+    // Handle document - supports both Cloudinary (JSON) and local file upload
+    if (req.file) {
+      // Local file upload via multipart/form-data
+      const path = require('path');
+      const relativePath = path.relative(path.join(__dirname, '../../'), req.file.path);
+      payload.document = {
+        filename: req.file.filename,
+        originalName: req.file.originalname,
+        documentName: req.file.originalname,
+        path: relativePath,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        bytes: req.file.size,
+        documentSize: req.file.size,
+        format: path.extname(req.file.originalname).replace('.', ''),
+        documentFormat: path.extname(req.file.originalname).replace('.', ''),
+        uploadedAt: new Date()
+      };
+    } else if (req.body.document) {
+      // Cloudinary document data from JSON body
+      const docData = typeof req.body.document === 'string' ? JSON.parse(req.body.document) : req.body.document;
+      payload.document = {
+        secureUrl: docData.secureUrl || docData.url,
+        url: docData.url || docData.secureUrl,
+        publicId: docData.publicId || docData.public_id,
+        public_id: docData.public_id || docData.publicId,
+        format: docData.format || docData.documentFormat,
+        documentFormat: docData.documentFormat || docData.format,
+        bytes: docData.bytes || docData.size || docData.documentSize,
+        size: docData.size || docData.bytes || docData.documentSize,
+        documentSize: docData.documentSize || docData.bytes || docData.size,
+        originalName: docData.originalName || docData.documentName,
+        documentName: docData.documentName || docData.originalName,
+        filename: docData.filename || docData.originalName || docData.documentName,
+        mimetype: docData.mimetype || `application/${docData.format || docData.documentFormat}`,
+        path: docData.path || docData.url || docData.secureUrl,
+        documentUrl: docData.documentUrl || docData.url || docData.secureUrl,
+        uploadedAt: docData.uploadedAt ? new Date(docData.uploadedAt) : new Date()
+      };
+    } else if (req.body.documentUrl) {
+      // Support legacy format with separate document fields
+      payload.document = {
+        secureUrl: req.body.documentUrl,
+        url: req.body.documentUrl,
+        documentUrl: req.body.documentUrl,
+        originalName: req.body.documentName || 'document',
+        documentName: req.body.documentName || 'document',
+        filename: req.body.documentName || 'document',
+        size: req.body.documentSize || 0,
+        bytes: req.body.documentSize || 0,
+        documentSize: req.body.documentSize || 0,
+        format: req.body.documentFormat || 'pdf',
+        documentFormat: req.body.documentFormat || 'pdf',
+        mimetype: `application/${req.body.documentFormat || 'pdf'}`,
+        path: req.body.documentUrl,
+        uploadedAt: new Date()
+      };
+      // Remove separate document fields from payload to avoid duplication
+      delete payload.documentUrl;
+      delete payload.documentName;
+      delete payload.documentSize;
+      delete payload.documentFormat;
+    }
+    
     const created = await ProjectRequest.create(payload);
     
     // Add audit trail entry for creation
@@ -184,58 +349,165 @@ router.post(
 // @route   PUT /api/project-requests/:id
 // @desc    Update project request (owner or mentor+)
 // @access  Private (Owner or Mentor+)
-router.put('/:id', verifyToken, [param('id').isString()], asyncHandler(async (req, res) => {
-  const projectRequest = await ProjectRequest.findById(req.params.id);
-  if (!projectRequest) throw notFoundErrorHandler('ProjectRequest');
-  
-  // Check if user is the owner or has mentor+ privileges
-  const isOwner = projectRequest.submittedBy.toString() === req.user.id.toString();
-  const isMentorOrHigher = ['mentor', 'researcher', 'admin'].includes(req.user.role);
-  
-  if (!isOwner && !isMentorOrHigher) {
-    throw authorizationErrorHandler('Access denied. You can only update your own project requests or need mentor+ privileges');
-  }
-  
-  // If user is owner, restrict updates based on status
-  if (isOwner && !isMentorOrHigher) {
-    if (projectRequest.status === 'approved') {
-      throw authorizationErrorHandler('Cannot update approved project requests');
+router.put('/:id', verifyToken, [param('id').isString()], 
+  (req, res, next) => {
+    // Handle optional file upload
+    uploadProjectDocument(req, res, (err) => {
+      if (err) {
+        return res.status(400).json({
+          success: false,
+          message: err.message || 'File upload error',
+          error: err.code === 'LIMIT_FILE_SIZE' ? 'File too large. Maximum size is 10MB.' : err.message
+        });
+      }
+      next();
+    });
+  },
+  asyncHandler(async (req, res) => {
+    const projectRequest = await ProjectRequest.findById(req.params.id);
+    if (!projectRequest) throw notFoundErrorHandler('ProjectRequest');
+    
+    // Check user roles
+    const isOwner = projectRequest.submittedBy.toString() === req.user.id.toString();
+    const isAdmin = req.user.role === 'admin';
+    const isMentorOrHigher = ['mentor', 'researcher', 'admin'].includes(req.user.role);
+    
+    // CRITICAL: If project is approved, ONLY admin can make updates
+    if (projectRequest.status === 'approved' && !isAdmin) {
+      throw authorizationErrorHandler('Cannot update approved project requests. Only administrators can modify approved projects.');
     }
-    if (projectRequest.status === 'rejected') {
-      throw authorizationErrorHandler('Cannot update rejected project requests. Please create a new request.');
+    
+    // Admin can always update (including status changes on approved projects)
+    if (isAdmin) {
+      // Admin has full access - proceed with update
+    } else {
+      // For non-admin users, check basic permissions
+      if (!isOwner && !isMentorOrHigher) {
+        throw authorizationErrorHandler('Access denied. You can only update your own project requests or need mentor+ privileges');
+      }
+      
+      // If user is owner (but not admin), restrict updates based on status
+      if (isOwner && !isMentorOrHigher) {
+        if (projectRequest.status === 'rejected') {
+          throw authorizationErrorHandler('Cannot update rejected project requests. Please create a new request.');
+        }
+      }
     }
-  }
-  
-  // Track changes for audit trail
-  const changes = [];
-  const updateData = { ...req.body };
-  
-  // Compare each field and track changes
-  Object.keys(updateData).forEach(key => {
-    if (updateData[key] !== undefined && projectRequest[key] !== updateData[key]) {
-      changes.push({
-        field: key,
-        oldValue: projectRequest[key],
-        newValue: updateData[key]
+    
+    // Track changes for audit trail
+    const changes = [];
+    const updateData = { ...req.body };
+    
+    // Handle document update - supports both Cloudinary (JSON) and local file upload
+    if (req.file) {
+      // Local file upload via multipart/form-data
+      const fs = require('fs');
+      const path = require('path');
+      
+      // Delete old document file if it exists (only for local files)
+      if (projectRequest.document && projectRequest.document.path && !projectRequest.document.url) {
+        const oldFilePath = path.join(__dirname, '../../', projectRequest.document.path);
+        if (fs.existsSync(oldFilePath)) {
+          fs.unlinkSync(oldFilePath);
+        }
+      }
+      
+      // Store relative path from project root for easier access
+      const relativePath = path.relative(path.join(__dirname, '../../'), req.file.path);
+      updateData.document = {
+        filename: req.file.filename,
+        originalName: req.file.originalname,
+        documentName: req.file.originalname,
+        path: relativePath,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        bytes: req.file.size,
+        documentSize: req.file.size,
+        format: path.extname(req.file.originalname).replace('.', ''),
+        documentFormat: path.extname(req.file.originalname).replace('.', ''),
+        uploadedAt: new Date()
+      };
+    } else if (req.body.document) {
+      // Cloudinary document data from JSON body
+      const docData = typeof req.body.document === 'string' ? JSON.parse(req.body.document) : req.body.document;
+      updateData.document = {
+        secureUrl: docData.secureUrl || docData.url,
+        url: docData.url || docData.secureUrl,
+        publicId: docData.publicId || docData.public_id,
+        public_id: docData.public_id || docData.publicId,
+        format: docData.format || docData.documentFormat,
+        documentFormat: docData.documentFormat || docData.format,
+        bytes: docData.bytes || docData.size || docData.documentSize,
+        size: docData.size || docData.bytes || docData.documentSize,
+        documentSize: docData.documentSize || docData.bytes || docData.size,
+        originalName: docData.originalName || docData.documentName,
+        documentName: docData.documentName || docData.originalName,
+        filename: docData.filename || docData.originalName || docData.documentName,
+        mimetype: docData.mimetype || `application/${docData.format || docData.documentFormat}`,
+        path: docData.path || docData.url || docData.secureUrl,
+        documentUrl: docData.documentUrl || docData.url || docData.secureUrl,
+        uploadedAt: docData.uploadedAt ? new Date(docData.uploadedAt) : new Date()
+      };
+    } else if (req.body.documentUrl) {
+      // Support legacy format with separate document fields
+      updateData.document = {
+        secureUrl: req.body.documentUrl,
+        url: req.body.documentUrl,
+        documentUrl: req.body.documentUrl,
+        originalName: req.body.documentName || 'document',
+        documentName: req.body.documentName || 'document',
+        filename: req.body.documentName || 'document',
+        size: req.body.documentSize || 0,
+        bytes: req.body.documentSize || 0,
+        documentSize: req.body.documentSize || 0,
+        format: req.body.documentFormat || 'pdf',
+        documentFormat: req.body.documentFormat || 'pdf',
+        mimetype: `application/${req.body.documentFormat || 'pdf'}`,
+        path: req.body.documentUrl,
+        uploadedAt: new Date()
+      };
+      // Remove separate document fields from updateData to avoid duplication
+      delete updateData.documentUrl;
+      delete updateData.documentName;
+      delete updateData.documentSize;
+      delete updateData.documentFormat;
+    }
+    
+    // Special handling for status updates: Admin can always update status, even on approved projects
+    const isStatusUpdate = updateData.status !== undefined && updateData.status !== projectRequest.status;
+    
+    // If updating status on an approved project, only admin can do this
+    if (isStatusUpdate && projectRequest.status === 'approved' && !isAdmin) {
+      throw authorizationErrorHandler('Cannot change status of approved project requests. Only administrators can modify the status of approved projects.');
+    }
+    
+    // Compare each field and track changes
+    Object.keys(updateData).forEach(key => {
+      if (updateData[key] !== undefined && JSON.stringify(projectRequest[key]) !== JSON.stringify(updateData[key])) {
+        changes.push({
+          field: key,
+          oldValue: projectRequest[key],
+          newValue: updateData[key]
+        });
+      }
+    });
+    
+    // Update the project request
+    Object.assign(projectRequest, updateData);
+    
+    // Add audit trail entries for each change
+    if (changes.length > 0) {
+      changes.forEach(change => {
+        projectRequest.addAuditEntry('updated', req.user.id, change, 
+          `Updated ${change.field}`, req);
       });
     }
-  });
-  
-  // Update the project request
-  Object.assign(projectRequest, updateData);
-  
-  // Add audit trail entries for each change
-  if (changes.length > 0) {
-    changes.forEach(change => {
-      projectRequest.addAuditEntry('updated', req.user.id, change, 
-        `Updated ${change.field}`, req);
-    });
-  }
-  
-  await projectRequest.save();
-  
-  res.json({ success: true, message: 'Project request updated', data: { item: projectRequest } });
-}));
+    
+    await projectRequest.save();
+    
+    res.json({ success: true, message: 'Project request updated', data: { item: projectRequest } });
+  })
+);
 
 router.post('/:id/approve', verifyToken, requireMentor, async (req, res) => {
   const pr = await ProjectRequest.findById(req.params.id);

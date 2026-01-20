@@ -130,7 +130,6 @@ router.get('/summary', verifyToken, requireAdmin, [
     });
     
   } catch (error) {
-    console.error('Dashboard summary error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch dashboard summary',

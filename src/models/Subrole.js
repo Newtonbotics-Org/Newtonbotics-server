@@ -235,7 +235,6 @@ subroleSchema.statics.seedDefaultSubroles = async function(adminUserId) {
     }));
     
     await this.insertMany(subrolesWithCreator);
-    console.log(`Seeded ${newSubroles.length} default subroles`);
   }
   
   return newSubroles.length;
