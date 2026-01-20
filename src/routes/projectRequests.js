@@ -270,22 +270,45 @@ router.post(
     
     // Handle document - supports both Cloudinary (JSON) and local file upload
     if (req.file) {
-      // Local file upload via multipart/form-data
+      // File upload via multipart/form-data
       const path = require('path');
-      const relativePath = path.relative(path.join(__dirname, '../../'), req.file.path);
-      payload.document = {
-        filename: req.file.filename,
-        originalName: req.file.originalname,
-        documentName: req.file.originalname,
-        path: relativePath,
-        mimetype: req.file.mimetype,
-        size: req.file.size,
-        bytes: req.file.size,
-        documentSize: req.file.size,
-        format: path.extname(req.file.originalname).replace('.', ''),
-        documentFormat: path.extname(req.file.originalname).replace('.', ''),
-        uploadedAt: new Date()
-      };
+      
+      // Handle memory storage (Vercel/serverless) vs disk storage
+      if (req.file.buffer) {
+        // Memory storage (Vercel) - file is in buffer
+        // Note: On Vercel, files should be uploaded to Cloudinary by frontend
+        // This is a fallback for direct file uploads
+        payload.document = {
+          filename: req.file.originalname,
+          originalName: req.file.originalname,
+          documentName: req.file.originalname,
+          mimetype: req.file.mimetype,
+          size: req.file.size,
+          bytes: req.file.size,
+          documentSize: req.file.size,
+          format: path.extname(req.file.originalname).replace('.', ''),
+          documentFormat: path.extname(req.file.originalname).replace('.', ''),
+          uploadedAt: new Date(),
+          // Note: On Vercel, file should be uploaded to Cloudinary by frontend
+          // This buffer-based upload is not recommended for production
+        };
+      } else if (req.file.path) {
+        // Disk storage (local development)
+        const relativePath = path.relative(path.join(__dirname, '../../'), req.file.path);
+        payload.document = {
+          filename: req.file.filename,
+          originalName: req.file.originalname,
+          documentName: req.file.originalname,
+          path: relativePath,
+          mimetype: req.file.mimetype,
+          size: req.file.size,
+          bytes: req.file.size,
+          documentSize: req.file.size,
+          format: path.extname(req.file.originalname).replace('.', ''),
+          documentFormat: path.extname(req.file.originalname).replace('.', ''),
+          uploadedAt: new Date()
+        };
+      }
     } else if (req.body.document) {
       // Cloudinary document data from JSON body
       const docData = typeof req.body.document === 'string' ? JSON.parse(req.body.document) : req.body.document;
@@ -400,33 +423,70 @@ router.put('/:id', verifyToken, [param('id').isString()],
     
     // Handle document update - supports both Cloudinary (JSON) and local file upload
     if (req.file) {
-      // Local file upload via multipart/form-data
+      // File upload via multipart/form-data
       const fs = require('fs');
       const path = require('path');
       
-      // Delete old document file if it exists (only for local files)
-      if (projectRequest.document && projectRequest.document.path && !projectRequest.document.url) {
-        const oldFilePath = path.join(__dirname, '../../', projectRequest.document.path);
-        if (fs.existsSync(oldFilePath)) {
-          fs.unlinkSync(oldFilePath);
+      // Handle memory storage (Vercel/serverless) vs disk storage
+      if (req.file.buffer) {
+        // Memory storage (Vercel) - file is in buffer
+        // Note: On Vercel, files should be uploaded to Cloudinary by frontend
+        
+        // Delete old document file if it exists (only for local files)
+        if (projectRequest.document && projectRequest.document.path && !projectRequest.document.url) {
+          try {
+            const oldFilePath = path.join(__dirname, '../../', projectRequest.document.path);
+            if (fs.existsSync(oldFilePath)) {
+              fs.unlinkSync(oldFilePath);
+            }
+          } catch (error) {
+            // Ignore errors when deleting old files (e.g., on Vercel)
+          }
         }
+        
+        updateData.document = {
+          filename: req.file.originalname,
+          originalName: req.file.originalname,
+          documentName: req.file.originalname,
+          mimetype: req.file.mimetype,
+          size: req.file.size,
+          bytes: req.file.size,
+          documentSize: req.file.size,
+          format: path.extname(req.file.originalname).replace('.', ''),
+          documentFormat: path.extname(req.file.originalname).replace('.', ''),
+          uploadedAt: new Date(),
+          // Note: On Vercel, file should be uploaded to Cloudinary by frontend
+        };
+      } else if (req.file.path) {
+        // Disk storage (local development)
+        // Delete old document file if it exists (only for local files)
+        if (projectRequest.document && projectRequest.document.path && !projectRequest.document.url) {
+          try {
+            const oldFilePath = path.join(__dirname, '../../', projectRequest.document.path);
+            if (fs.existsSync(oldFilePath)) {
+              fs.unlinkSync(oldFilePath);
+            }
+          } catch (error) {
+            // Ignore errors when deleting old files
+          }
+        }
+        
+        // Store relative path from project root for easier access
+        const relativePath = path.relative(path.join(__dirname, '../../'), req.file.path);
+        updateData.document = {
+          filename: req.file.filename,
+          originalName: req.file.originalname,
+          documentName: req.file.originalname,
+          path: relativePath,
+          mimetype: req.file.mimetype,
+          size: req.file.size,
+          bytes: req.file.size,
+          documentSize: req.file.size,
+          format: path.extname(req.file.originalname).replace('.', ''),
+          documentFormat: path.extname(req.file.originalname).replace('.', ''),
+          uploadedAt: new Date()
+        };
       }
-      
-      // Store relative path from project root for easier access
-      const relativePath = path.relative(path.join(__dirname, '../../'), req.file.path);
-      updateData.document = {
-        filename: req.file.filename,
-        originalName: req.file.originalname,
-        documentName: req.file.originalname,
-        path: relativePath,
-        mimetype: req.file.mimetype,
-        size: req.file.size,
-        bytes: req.file.size,
-        documentSize: req.file.size,
-        format: path.extname(req.file.originalname).replace('.', ''),
-        documentFormat: path.extname(req.file.originalname).replace('.', ''),
-        uploadedAt: new Date()
-      };
     } else if (req.body.document) {
       // Cloudinary document data from JSON body
       const docData = typeof req.body.document === 'string' ? JSON.parse(req.body.document) : req.body.document;
