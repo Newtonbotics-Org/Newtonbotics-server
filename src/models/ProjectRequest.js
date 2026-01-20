@@ -10,6 +10,27 @@ const projectRequestSchema = new mongoose.Schema(
     estimatedDurationMonths: { type: Number, required: true, min: 1, max: 24 },
     budgetEstimate: { type: Number, min: 0 },
     requiredResources: [{ type: String, maxlength: 200 }],
+    // Document field - supports both Cloudinary and local file storage
+    document: {
+      // Cloudinary fields
+      secureUrl: { type: String, maxlength: 500 },
+      url: { type: String, maxlength: 500 },
+      publicId: { type: String, maxlength: 200 },
+      public_id: { type: String, maxlength: 200 }, // Alternative naming
+      format: { type: String, maxlength: 50 },
+      bytes: { type: Number, min: 0 },
+      // Local file storage fields
+      filename: { type: String, maxlength: 255 },
+      originalName: { type: String, maxlength: 255 },
+      documentName: { type: String, maxlength: 255 }, // Alternative naming
+      path: { type: String, maxlength: 500 },
+      mimetype: { type: String, maxlength: 100 },
+      size: { type: Number, min: 0 },
+      documentSize: { type: Number, min: 0 }, // Alternative naming
+      documentFormat: { type: String, maxlength: 50 }, // Alternative naming
+      documentUrl: { type: String, maxlength: 500 }, // Alternative naming
+      uploadedAt: { type: Date }
+    },
     mentorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
     status: { type: String, enum: ['pending', 'under_review', 'approved', 'rejected', 'on_hold'], default: 'pending', index: true },
     submittedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
