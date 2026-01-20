@@ -213,11 +213,8 @@ router.get(
           Event.countDocuments({ type: 'workshop', status: 'completed' })
         ]).then(([workshopCount, eventWorkshopCount]) => {
           const total = workshopCount + eventWorkshopCount;
-          // Log for debugging
-          console.log(`[Impact Metrics] Workshops: ${workshopCount} from Workshop model, ${eventWorkshopCount} from Event model, Total: ${total}`);
           return total;
         }).catch((error) => {
-          console.error('[Impact Metrics] Error counting workshops:', error);
           // Fallback to just Workshop count if Event query fails
           return Workshop.countDocuments({ status: 'completed' });
         })

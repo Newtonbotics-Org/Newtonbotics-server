@@ -127,8 +127,6 @@ app.get('/', (req, res) => {
 // Health check endpoint
 app.get('/health', async (req, res) => {
   const db = getConnectionStatus();
-  const user = await User.find()
-  console.log('✅ Found contact submissions:', user);
   res.status(200).json({
     status: 'OK',
     timestamp: new Date().toISOString(),

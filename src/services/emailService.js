@@ -6,16 +6,28 @@ const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
 
 let transporter = null;
 
+function normalizeSmtpPass(pass) {
+  if (!pass) return pass;
+  // Gmail app passwords are often shown with spaces; SMTP auth expects the raw value.
+  return String(pass).replace(/\s+/g, '');
+}
+
 function getTransporter() {
   if (transporter) return transporter;
   try {
+    const host = process.env.SMTP_HOST;
+    const port = parseInt(process.env.SMTP_PORT || '587');
+    const secure = String(process.env.SMTP_SECURE || 'false') === 'true';
+    const user = process.env.SMTP_USER;
+    const pass = normalizeSmtpPass(process.env.SMTP_PASS);
+
     transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: String(process.env.SMTP_SECURE || 'false') === 'true',
-      auth: process.env.SMTP_USER
-        ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-        : undefined,
+      host,
+      port,
+      secure,
+      // Gmail on 587 typically requires STARTTLS.
+      requireTLS: !secure && port === 587,
+      auth: user ? { user, pass } : undefined,
     });
     return transporter;
   } catch (err) {
@@ -31,9 +43,24 @@ async function sendEmail({ to, subject, html, text }) {
     logger.info(`EMAIL to=${to} subject=${subject}\n${text || html}`);
     return { mocked: true };
   }
-  const info = await tx.sendMail({ from, to, subject, html, text });
-  logger.info(`Email sent to ${to}: ${info.messageId}`);
-  return info;
+  try {
+    const info = await tx.sendMail({ from, to, subject, html, text });
+    logger.info(`Email sent to ${to}: ${info.messageId}`);
+    return info;
+  } catch (err) {
+    // Normalize common SMTP auth failures to a more actionable message.
+    if (err && (err.code === 'EAUTH' || err.responseCode === 535)) {
+      const isGmail = String(process.env.SMTP_HOST || '').includes('gmail');
+      const hint = isGmail
+        ? 'Gmail rejected the login. Use a Gmail App Password (requires 2‑Step Verification) and set it as SMTP_PASS.'
+        : 'SMTP authentication failed. Check SMTP_USER/SMTP_PASS.';
+      logger.error(`${hint} ${err.message || err}`);
+      const e = new Error(hint);
+      e.code = 'EMAIL_AUTH_FAILED';
+      throw e;
+    }
+    throw err;
+  }
 }
 
 function buildHtml(title, body) {
