@@ -108,6 +108,17 @@ async function sendPasswordResetOtpEmail({ email, otp }) {
   return sendEmail({ to: email, subject, html, text });
 }
 
+async function sendEnvVaultOtpEmail({ email, otp }) {
+  const subject = 'Your NewtonBotics env vault access code';
+  const html = buildHtml('Env vault access code', `
+    <p>Use the following one-time code to unlock the environment vault in the admin Docs page:</p>
+    <p style="font-size:24px; letter-spacing:4px; font-weight:700; color:#111827;">${otp}</p>
+    <p>This code expires in 10 minutes. If you didn't request this, secure your admin account immediately.</p>
+  `);
+  const text = `Your env vault access code is: ${otp} (expires in 10 minutes)`;
+  return sendEmail({ to: email, subject, html, text });
+}
+
 async function sendRoleAssignedEmail({ email, fullName, role }) {
   const subject = 'Your NewtonBotics role has been updated';
   const html = buildHtml('Role updated', `
@@ -147,6 +158,7 @@ module.exports = {
   sendEmail,
   sendPasswordResetEmail,
   sendPasswordResetOtpEmail,
+  sendEnvVaultOtpEmail,
   sendRoleAssignedEmail,
   sendContactAcknowledgement,
   sendContactNotificationToAdmin,
