@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, validationResult, query } = require('express-validator');
 const User = require('../models/User');
+const PastLeader = require('../models/PastLeader');
 const { 
   asyncHandler, 
   validationErrorHandler,
@@ -22,6 +23,8 @@ const InternalMessage = require('../models/InternalMessage');
 const NewsApplication = require('../models/NewsApplication');
 const ProjectRequest = require('../models/ProjectRequest');
 const { sendRoleAssignedEmail } = require('../services/emailService');
+const { compareTenureDates, tenureDateValidator } = require('../utils/tenureDates');
+const { applyUserSearchFilter } = require('../utils/userSearch');
 
 const router = express.Router();
 
@@ -197,6 +200,16 @@ const searchValidation = [
     .optional()
     .isInt({ min: 0 })
     .withMessage('Skip must be a non-negative integer'),
+
+  query('excludePastLeaders')
+    .optional()
+    .isIn(['true', 'false'])
+    .withMessage('excludePastLeaders must be true or false'),
+
+  query('pastLeadersOnly')
+    .optional()
+    .isIn(['true', 'false'])
+    .withMessage('pastLeadersOnly must be true or false'),
 ];
 
 // @route   GET /api/users/deactivated
@@ -209,9 +222,7 @@ router.get('/deactivated', requireAdmin, asyncHandler(async (req, res) => {
     isActive: false,
   };
 
-  if (q) {
-    searchQuery.$text = { $search: q };
-  }
+  applyUserSearchFilter(searchQuery, q);
 
   if (role) {
     searchQuery.role = role;
@@ -290,9 +301,7 @@ router.get('/deactivated/team-members', requireAdmin, asyncHandler(async (req, r
     role: 'team_member',
   };
 
-  if (q) {
-    searchQuery.$text = { $search: q };
-  }
+  applyUserSearchFilter(searchQuery, q);
 
   if (department) {
     searchQuery.department = department;
@@ -366,14 +375,33 @@ router.get('/', requireAdmin, searchValidation, asyncHandler(async (req, res) =>
     throw validationErrorHandler(errors);
   }
 
-  const { q, role, department, skills, limit = 20, skip = 0 } = req.query;
+  const { q, role, department, skills, limit = 20, skip = 0, excludePastLeaders, pastLeadersOnly } = req.query;
+
+  const pastLeaderUserIds = await PastLeader.distinct('userId', {
+    userId: { $exists: true, $ne: null },
+  });
+
+  if (pastLeadersOnly === 'true') {
+    if (!pastLeaderUserIds.length) {
+      return res.json({
+        success: true,
+        data: {
+          users: [],
+          pagination: {
+            total: 0,
+            limit: parseInt(limit, 10),
+            skip: parseInt(skip, 10),
+            hasMore: false,
+          },
+        },
+      });
+    }
+  }
 
   // Build search query
   const searchQuery = { isActive: true };
   
-  if (q) {
-    searchQuery.$text = { $search: q };
-  }
+  applyUserSearchFilter(searchQuery, q);
   
   if (role) {
     searchQuery.role = role;
@@ -387,14 +415,24 @@ router.get('/', requireAdmin, searchValidation, asyncHandler(async (req, res) =>
     searchQuery.skills = { $in: skills };
   }
 
-  // Execute search
-  const users = await User.search(q, { role, department, skills, limit: parseInt(limit), skip: parseInt(skip) });
+  if (pastLeadersOnly === 'true') {
+    searchQuery._id = { $in: pastLeaderUserIds };
+  } else if (excludePastLeaders === 'true' && pastLeaderUserIds.length) {
+    searchQuery._id = { $nin: pastLeaderUserIds };
+  }
+
+  const users = await User.find(searchQuery)
+    .select('-passwordHash')
+    .limit(parseInt(limit, 10))
+    .skip(parseInt(skip, 10))
+    .sort({ createdAt: -1 });
+
   const total = await User.countDocuments(searchQuery);
 
   // Log search operation
   logger.info(`User search performed by ${req.user.id}`, {
     query: q,
-    filters: { role, department, skills },
+    filters: { role, department, skills, excludePastLeaders, pastLeadersOnly },
     results: users.length,
     total
   });
@@ -405,9 +443,9 @@ router.get('/', requireAdmin, searchValidation, asyncHandler(async (req, res) =>
       users,
       pagination: {
         total,
-        limit: parseInt(limit),
-        skip: parseInt(skip),
-        hasMore: total > parseInt(skip) + users.length
+        limit: parseInt(limit, 10),
+        skip: parseInt(skip, 10),
+        hasMore: total > parseInt(skip, 10) + users.length
       }
     }
   });
@@ -475,9 +513,7 @@ router.get('/club-members', asyncHandler(async (req, res) => {
     role: { $in: ['team_member', 'mentor', 'researcher', 'admin', 'community'] }
   };
   
-  if (q) {
-    searchQuery.$text = { $search: q };
-  }
+  applyUserSearchFilter(searchQuery, q);
   
   if (department) {
     searchQuery.department = department;
@@ -539,6 +575,66 @@ router.get('/club-members', asyncHandler(async (req, res) => {
         hasMore: total > parseInt(skip) + users.length
       }
     }
+  });
+}));
+
+// @route   GET /api/users/statistics
+// @desc    Get user statistics (admin only)
+// @access  Private (Admin)
+router.get('/statistics', requireAdmin, asyncHandler(async (req, res) => {
+  const stats = await User.getStatistics();
+
+  res.json({
+    success: true,
+    data: {
+      statistics: stats
+    }
+  });
+}));
+
+// @route   GET /api/users/departments
+// @desc    Get list of departments
+// @access  Private
+router.get('/departments', asyncHandler(async (req, res) => {
+  const departments = await User.distinct('department', { isActive: true });
+
+  res.json({
+    success: true,
+    data: {
+      departments: departments.filter(dept => dept).sort()
+    }
+  });
+}));
+
+// @route   GET /api/users/roles
+// @desc    Get list of roles
+// @access  Private
+router.get('/roles', asyncHandler(async (req, res) => {
+  const roles = ['student', 'team_member', 'mentor', 'researcher', 'community', 'admin'];
+
+  res.json({
+    success: true,
+    data: {
+      roles
+    }
+  });
+}));
+
+// @route   GET /api/users/subroles
+// @desc    Get list of available subroles (deprecated - use /api/subroles/active instead)
+// @access  Private
+router.get('/subroles', asyncHandler(async (req, res) => {
+  const Subrole = require('../models/Subrole');
+  const subroles = await Subrole.getActiveSubroles();
+
+  const subroleNames = subroles.map(subrole => subrole.name);
+
+  res.json({
+    success: true,
+    data: {
+      subroles: subroleNames
+    },
+    message: 'This endpoint is deprecated. Use /api/subroles/active for detailed subrole information.'
   });
 }));
 
@@ -804,63 +900,94 @@ router.post('/:id/reactivate', requireAdmin, asyncHandler(async (req, res) => {
   });
 }));
 
-// @route   GET /api/users/statistics
-// @desc    Get user statistics (admin only)
+// @route   POST /api/users/:id/mark-past-leader
+// @desc    Promote a leadership team member to past leader (admin only)
 // @access  Private (Admin)
-router.get('/statistics', requireAdmin, asyncHandler(async (req, res) => {
-  const stats = await User.getStatistics();
+router.post('/:id/mark-past-leader', requireAdmin, [
+  body('position').isString().trim().isLength({ min: 2, max: 100 }),
+  tenureDateValidator('tenureStart'),
+  tenureDateValidator('tenureEnd', { optional: true }),
+  body('description').optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+  body('subrole').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
+  body('removeFromLeadership').optional().isBoolean().toBoolean(),
+  body('isActive').optional().isBoolean().toBoolean(),
+], asyncHandler(async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw validationErrorHandler(errors);
 
-  res.json({
-    success: true,
-    data: {
-      statistics: stats
-    }
+  const { id } = req.params;
+  const {
+    position,
+    tenureStart,
+    tenureEnd,
+    description,
+    subrole,
+    removeFromLeadership = true,
+    isActive = true,
+  } = req.body;
+
+  if (tenureEnd && compareTenureDates(tenureEnd, tenureStart) < 0) {
+    return res.status(400).json({
+      success: false,
+      error: { message: 'tenureEnd cannot be before tenureStart' },
+    });
+  }
+
+  const user = await User.findById(id);
+  if (!user) throw notFoundErrorHandler('User');
+
+  const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+
+  const pastLeader = await PastLeader.create({
+    userId: user._id,
+    fullName,
+    position,
+    tenureStart,
+    tenureEnd,
+    imageUrl: user.profileImageUrl,
+    linkedinUrl: user.socialLinks?.linkedin,
+    email: user.email,
+    description: description || user.bio,
+    subrole,
+    isActive,
+    createdBy: req.user.id,
   });
-}));
 
-// @route   GET /api/users/departments
-// @desc    Get list of departments
-// @access  Private
-router.get('/departments', asyncHandler(async (req, res) => {
-  const departments = await User.distinct('department', { isActive: true });
+  const previousSubroles = [...(user.subroles || [])];
 
-  res.json({
-    success: true,
-    data: {
-      departments: departments.filter(dept => dept).sort()
+  if (removeFromLeadership) {
+    if (subrole) {
+      user.subroles = (user.subroles || []).filter((s) => s !== subrole);
+    } else {
+      user.subroles = [];
     }
+    await user.save();
+  }
+
+  logger.info(`User marked as past leader by admin ${req.user.id}`, {
+    targetUserId: id,
+    pastLeaderId: pastLeader._id,
+    position,
+    tenureStart,
+    tenureEnd,
+    subrole,
+    removeFromLeadership,
   });
-}));
 
-// @route   GET /api/users/roles
-// @desc    Get list of roles
-// @access  Private
-router.get('/roles', asyncHandler(async (req, res) => {
-  const roles = ['student', 'team_member', 'mentor', 'researcher', 'community', 'admin'];
-
-  res.json({
+  res.status(201).json({
     success: true,
+    message: 'Leadership member marked as past leader',
     data: {
-      roles
-    }
-  });
-}));
-
-// @route   GET /api/users/subroles
-// @desc    Get list of available subroles (deprecated - use /api/subroles/active instead)
-// @access  Private
-router.get('/subroles', asyncHandler(async (req, res) => {
-  const Subrole = require('../models/Subrole');
-  const subroles = await Subrole.getActiveSubroles();
-  
-  const subroleNames = subroles.map(subrole => subrole.name);
-
-  res.json({
-    success: true,
-    data: {
-      subroles: subroleNames
+      pastLeader: pastLeader.toObject(),
+      user: {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        subroles: user.subroles || [],
+        previousSubroles,
+      },
     },
-    message: 'This endpoint is deprecated. Use /api/subroles/active for detailed subrole information.'
   });
 }));
 

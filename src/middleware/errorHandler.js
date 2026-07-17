@@ -70,6 +70,15 @@ const errorHandler = (err, req, res, next) => {
     error = new ApiError(429, message);
   }
 
+  // Brevo / email delivery failures
+  if (err.code === 'EMAIL_SEND_FAILED') {
+    const isDev = process.env.NODE_ENV === 'development';
+    const message = isDev && err.message?.includes('unrecognised IP')
+      ? 'Email could not be sent: Brevo blocked this server IP. Authorize it at https://app.brevo.com/security/authorised_ips or disable IP restriction in Brevo.'
+      : 'Unable to send email right now. Please try again later or contact support.';
+    error = new ApiError(503, message);
+  }
+
   // Socket.IO errors
   if (err.message && err.message.includes('Authentication error')) {
     const message = 'Socket authentication failed.';

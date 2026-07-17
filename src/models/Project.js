@@ -378,8 +378,24 @@ const projectSchema = new mongoose.Schema({
   }]
 }, {
   timestamps: true,
-  toJSON: { virtuals: true },
-  toObject: { virtuals: true }
+  toJSON: {
+    virtuals: true,
+    transform(_doc, ret) {
+      if (ret.status === 'completed' && (ret.progress == null || ret.progress < 100)) {
+        ret.progress = 100;
+      }
+      return ret;
+    },
+  },
+  toObject: {
+    virtuals: true,
+    transform(_doc, ret) {
+      if (ret.status === 'completed' && (ret.progress == null || ret.progress < 100)) {
+        ret.progress = 100;
+      }
+      return ret;
+    },
+  },
 });
 
 // Virtual for project duration
@@ -477,12 +493,37 @@ projectSchema.index({
   tags: 'text'
 });
 
-// Pre-save middleware to update progress based on milestones
-projectSchema.pre('save', function(next) {
+// Pre-save middleware to update progress based on status and milestones
+projectSchema.methods.syncProgress = function syncProgress() {
+  if (this.status === 'completed') {
+    this.progress = 100;
+    return;
+  }
+
   if (this.milestones && this.milestones.length > 0) {
-    const completedCount = this.milestones.filter(m => m.status === 'completed').length;
+    const completedCount = this.milestones.filter((m) => m.status === 'completed').length;
     this.progress = Math.round((completedCount / this.milestones.length) * 100);
   }
+};
+
+projectSchema.pre('save', function(next) {
+  this.syncProgress();
+  next();
+});
+
+projectSchema.pre('findOneAndUpdate', function(next) {
+  const update = this.getUpdate();
+  if (!update) return next();
+
+  const payload = update.$set ?? update;
+  if (payload.status === 'completed') {
+    if (update.$set) {
+      update.$set.progress = 100;
+    } else {
+      update.progress = 100;
+    }
+  }
+
   next();
 });
 
@@ -663,7 +704,7 @@ projectSchema.methods.getStatistics = function() {
     totalTeamMembersEver: this.allTeamMembers.length + 1, // +1 for team leader
     activeTeamMembers: this.allTeamMembers.filter(m => m.isActive).length + 1, // +1 for team leader
     formerTeamMembers: this.allTeamMembers.filter(m => !m.isActive).length,
-    progress: this.progress,
+    progress: this.status === 'completed' ? 100 : this.progress,
     isOverdue: this.isOverdue,
     duration: this.duration
   };

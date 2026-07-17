@@ -351,12 +351,11 @@ userSchema.statics.findByDepartment = function(department) {
 // Static method to search users
 userSchema.statics.search = function(query, options = {}) {
   const { role, department, skills, limit = 20, skip = 0 } = options;
+  const { applyUserSearchFilter } = require('../utils/userSearch');
   
   let searchQuery = { isActive: true };
   
-  if (query) {
-    searchQuery.$text = { $search: query };
-  }
+  applyUserSearchFilter(searchQuery, query);
   
   if (role) {
     searchQuery.role = role;

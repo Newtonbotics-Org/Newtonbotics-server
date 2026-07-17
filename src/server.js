@@ -28,11 +28,13 @@ const projectRequestRoutes = require('./routes/projectRequests');
 const newsRoutes = require('./routes/news');
 const newsletterRoutes = require('./routes/newsletter');
 const mediaRoutes = require('./routes/media');
+const resourceRoutes = require('./routes/resources');
 const contactRoutes = require('./routes/contact');
 const messageRoutes = require('./routes/messages');
 const publicRoutes = require('./routes/public');
 const roleApprovalRoutes = require('./routes/roleApprovals');
 const researchAreaRoutes = require('./routes/researchAreas');
+const pastLeaderRoutes = require('./routes/pastLeaders');
 const adminDashboardRoutes = require('./routes/adminDashboard');
 const subroleRoutes = require('./routes/subroles');
 const attendanceRoutes = require('./routes/attendance');
@@ -69,37 +71,41 @@ app.use(cors({
 // Request context & simple console logging
 app.use(require('./middleware/requestContext'));
 
-// Ensure MongoDB connection per request (safe for serverless)
+// Ensure MongoDB connection per request — quick retry only (full retries run at startup)
 app.use(async (req, res, next) => {
   try {
-    await connectDB();
+    await connectDB({ quick: true });
   } catch (e) {
     // Proceed even if DB is unavailable; route handlers can handle accordingly
   }
   next();
 });
 
-// Rate limiting
+// Rate limiting — off locally (solo dev + HMR easily exceeds 100 req/15min)
+const isRateLimitDisabled =
+  process.env.DISABLE_RATE_LIMIT === 'true' ||
+  (process.env.NODE_ENV === 'development' && process.env.DISABLE_RATE_LIMIT !== 'false');
+
 const rateLimitWindowMs = parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || (15 * 60 * 1000);
 const limiter = rateLimit({
   windowMs: rateLimitWindowMs,
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS, 10) || 100, // limit each IP to 100 requests per windowMs
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS, 10) || 100,
   message: {
     error: 'Too many requests from this IP, please try again later.',
     retryAfter: Math.ceil(rateLimitWindowMs / 1000 / 60),
   },
   standardHeaders: true,
   legacyHeaders: false,
-  // Allow critical auth route to bypass global limiter
-  skip: (req) => req.path === '/auth/change-password',
+  skip: () => isRateLimitDisabled,
 });
 
 // Speed limiting (align window with rate limit unless overridden)
 const speedLimitWindowMs = parseInt(process.env.SPEED_LIMIT_WINDOW_MS, 10) || rateLimitWindowMs;
 const speedLimiter = slowDown({
   windowMs: speedLimitWindowMs,
-  delayAfter: 50, // allow 50 requests per window, then...
-  delayMs: () => 500, // fixed delay per request above the threshold
+  delayAfter: 50,
+  delayMs: () => 500,
+  skip: () => isRateLimitDisabled,
 });
 
 app.use('/api/', limiter);
@@ -151,11 +157,13 @@ app.use('/api/project-requests', projectRequestRoutes);
 app.use('/api/news', newsRoutes);
 app.use('/api/newsletter', newsletterRoutes);
 app.use('/api/media', mediaRoutes);
+app.use('/api/resources', resourceRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/role-approvals', roleApprovalRoutes);
 app.use('/api/research-areas', researchAreaRoutes);
+app.use('/api/past-leaders', pastLeaderRoutes);
 app.use('/api/admin/dashboard', adminDashboardRoutes);
 app.use('/api/subroles', subroleRoutes);
 app.use('/api/attendance', attendanceRoutes);
