@@ -5,9 +5,9 @@ const { sendEmail } = require('../src/services/emailService');
 async function main() {
   try {
     const to = process.argv[2] || 'monu2feb2004@gmail.com';
-    const subject = 'NewtonBotics SMTP Test';
-    const text = 'SMTP test email from NewtonBotics backend.';
-    const html = '<p>SMTP test email from <strong>NewtonBotics</strong> backend.</p>';
+    const subject = 'NewtonBotics Brevo Test';
+    const text = 'Brevo test email from NewtonBotics backend.';
+    const html = '<p>Brevo test email from <strong>NewtonBotics</strong> backend.</p>';
     const info = await sendEmail({ to, subject, text, html });
     console.log('Email sent:', info && info.messageId ? info.messageId : info);
     process.exit(0);

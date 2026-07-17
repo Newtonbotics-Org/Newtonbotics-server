@@ -1,64 +1,77 @@
-const nodemailer = require('nodemailer');
 const logger = require('../utils/logger');
 
-const from = process.env.EMAIL_FROM || 'no-reply@example.com';
+const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
+const fromEmail = process.env.EMAIL_FROM || process.env.BREVO_SENDER_EMAIL || 'robotics.club@rishihood.edu.in';
+const fromName = process.env.EMAIL_FROM_NAME || 'NewtonBotics';
 const baseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
 
-let transporter = null;
+function parseRecipients(to) {
+  if (Array.isArray(to)) {
+    return to.filter(Boolean).map((email) => ({ email: String(email).trim() }));
+  }
 
-function normalizeSmtpPass(pass) {
-  if (!pass) return pass;
-  // Gmail app passwords are often shown with spaces; SMTP auth expects the raw value.
-  return String(pass).replace(/\s+/g, '');
+  return String(to)
+    .split(',')
+    .map((email) => email.trim())
+    .filter(Boolean)
+    .map((email) => ({ email }));
 }
 
-function getTransporter() {
-  if (transporter) return transporter;
-  try {
-    const host = process.env.SMTP_HOST;
-    const port = parseInt(process.env.SMTP_PORT || '587');
-    const secure = String(process.env.SMTP_SECURE || 'false') === 'true';
-    const user = process.env.SMTP_USER;
-    const pass = normalizeSmtpPass(process.env.SMTP_PASS);
-
-    transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      // Gmail on 587 typically requires STARTTLS.
-      requireTLS: !secure && port === 587,
-      auth: user ? { user, pass } : undefined,
-    });
-    return transporter;
-  } catch (err) {
-    logger.error('Email transporter init failed:', err);
-    return null;
-  }
+function isBrevoConfigured() {
+  return Boolean(process.env.BREVO_API_KEY?.trim());
 }
 
 async function sendEmail({ to, subject, html, text }) {
-  const tx = getTransporter();
-  if (!tx) {
-    logger.warn('Email transporter not configured. Logging email instead.');
+  if (!isBrevoConfigured()) {
+    logger.warn('BREVO_API_KEY not configured. Logging email instead.');
     logger.info(`EMAIL to=${to} subject=${subject}\n${text || html}`);
     return { mocked: true };
   }
+
+  const recipients = parseRecipients(to);
+  if (recipients.length === 0) {
+    throw new Error('At least one recipient email is required');
+  }
+
+  const payload = {
+    sender: {
+      name: fromName,
+      email: fromEmail,
+    },
+    to: recipients,
+    subject,
+    htmlContent: html,
+    textContent: text || stripHtml(html || ''),
+  };
+
   try {
-    const info = await tx.sendMail({ from, to, subject, html, text });
-    logger.info(`Email sent to ${to}: ${info.messageId}`);
-    return info;
-  } catch (err) {
-    // Normalize common SMTP auth failures to a more actionable message.
-    if (err && (err.code === 'EAUTH' || err.responseCode === 535)) {
-      const isGmail = String(process.env.SMTP_HOST || '').includes('gmail');
-      const hint = isGmail
-        ? 'Gmail rejected the login. Use a Gmail App Password (requires 2‑Step Verification) and set it as SMTP_PASS.'
-        : 'SMTP authentication failed. Check SMTP_USER/SMTP_PASS.';
-      logger.error(`${hint} ${err.message || err}`);
-      const e = new Error(hint);
-      e.code = 'EMAIL_AUTH_FAILED';
-      throw e;
+    const response = await fetch(BREVO_API_URL, {
+      method: 'POST',
+      headers: {
+        'api-key': process.env.BREVO_API_KEY,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      const message = data?.message || data?.code || response.statusText;
+      logger.error(`Brevo email failed: ${message}`, data);
+      const error = new Error(`Email delivery failed: ${message}`);
+      error.code = 'EMAIL_SEND_FAILED';
+      throw error;
     }
+
+    logger.info(`Email sent via Brevo to ${to}: ${data.messageId || 'ok'}`);
+    return data;
+  } catch (err) {
+    if (err.code === 'EMAIL_SEND_FAILED') {
+      throw err;
+    }
+    logger.error('Brevo email request failed:', err);
     throw err;
   }
 }
@@ -116,7 +129,7 @@ async function sendContactAcknowledgement({ name, email }) {
 }
 
 async function sendContactNotificationToAdmin({ subject: sub, name, email, message, phone, category }) {
-  const adminEmail = process.env.ADMIN_NOTIFY_EMAIL || process.env.SMTP_USER || from;
+  const adminEmail = process.env.ADMIN_NOTIFY_EMAIL || fromEmail;
   const subject = `[Contact] ${sub} from ${name}`;
   const html = buildHtml('New contact submission', `
     <p><strong>From:</strong> ${name} (${email})</p>
@@ -139,7 +152,6 @@ module.exports = {
   sendContactNotificationToAdmin,
 };
 
-// Extra domain notifications
 async function sendProjectCreatedNotification({ project, recipients = [] }) {
   if (!project) return;
   const subject = `New Project Created: ${project.title}`;
@@ -183,7 +195,6 @@ module.exports.sendProjectCreatedNotification = sendProjectCreatedNotification;
 module.exports.sendWorkshopRegistrationEmail = sendWorkshopRegistrationEmail;
 module.exports.sendInventoryCheckoutEmail = sendInventoryCheckoutEmail;
 
-// Project status changed
 async function sendProjectStatusChangedEmail({ project, oldStatus, newStatus, recipients = [] }) {
   if (!project || !oldStatus || !newStatus) return;
   const subject = `Project Status Updated: ${project.title}`;
@@ -198,7 +209,6 @@ async function sendProjectStatusChangedEmail({ project, oldStatus, newStatus, re
   return sendEmail({ to: toList.join(','), subject, html, text });
 }
 
-// Project request status notifications
 async function sendProjectRequestStatusEmail({ request, newStatus, recipientEmail }) {
   if (!request || !recipientEmail) return;
   const subject = `Project Request ${newStatus.replace('_', ' ').toUpperCase()}: ${request.title}`;
@@ -212,7 +222,6 @@ async function sendProjectRequestStatusEmail({ request, newStatus, recipientEmai
 module.exports.sendProjectStatusChangedEmail = sendProjectStatusChangedEmail;
 module.exports.sendProjectRequestStatusEmail = sendProjectRequestStatusEmail;
 
-// Newsletter campaign sending
 async function sendNewsletterCampaign({ campaign, recipients, isTest = false }) {
   if (!campaign || !recipients || recipients.length === 0) {
     throw new Error('Campaign and recipients are required');
@@ -221,13 +230,12 @@ async function sendNewsletterCampaign({ campaign, recipients, isTest = false }) 
   const results = {
     sent: 0,
     failed: 0,
-    errors: []
+    errors: [],
   };
 
-  // Process recipients in batches to avoid overwhelming the email service
   const batchSize = 10;
   const batches = [];
-  
+
   for (let i = 0; i < recipients.length; i += batchSize) {
     batches.push(recipients.slice(i, i + batchSize));
   }
@@ -235,21 +243,19 @@ async function sendNewsletterCampaign({ campaign, recipients, isTest = false }) 
   for (const batch of batches) {
     const batchPromises = batch.map(async (recipient) => {
       try {
-        // Personalize content if needed
         let personalizedContent = campaign.content;
         let personalizedSubject = campaign.subject;
-        
+
         if (recipient.firstName) {
           personalizedContent = personalizedContent.replace(/{{firstName}}/g, recipient.firstName);
           personalizedSubject = personalizedSubject.replace(/{{firstName}}/g, recipient.firstName);
         }
-        
+
         if (recipient.lastName) {
           personalizedContent = personalizedContent.replace(/{{lastName}}/g, recipient.lastName);
           personalizedSubject = personalizedSubject.replace(/{{lastName}}/g, recipient.lastName);
         }
 
-        // Add unsubscribe link
         const unsubscribeLink = `${baseUrl}/newsletter/unsubscribe?email=${encodeURIComponent(recipient.email)}`;
         personalizedContent += `<br><br><hr><p style="font-size:12px; color:#666;"><a href="${unsubscribeLink}">Unsubscribe from this newsletter</a></p>`;
 
@@ -260,7 +266,7 @@ async function sendNewsletterCampaign({ campaign, recipients, isTest = false }) 
           to: recipient.email,
           subject: isTest ? `[TEST] ${personalizedSubject}` : personalizedSubject,
           html,
-          text
+          text,
         });
 
         results.sent++;
@@ -268,20 +274,18 @@ async function sendNewsletterCampaign({ campaign, recipients, isTest = false }) 
       } catch (error) {
         results.failed++;
         results.errors.push({ email: recipient.email, error: error.message });
-        logger.error(`Failed to send newsletter to ${recipient.email}`, { 
-          campaignId: campaign._id, 
+        logger.error(`Failed to send newsletter to ${recipient.email}`, {
+          campaignId: campaign._id,
           error: error.message,
-          isTest 
+          isTest,
         });
       }
     });
 
-    // Wait for batch to complete before processing next batch
     await Promise.all(batchPromises);
-    
-    // Small delay between batches to be respectful to email service
+
     if (batches.indexOf(batch) < batches.length - 1) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
 
@@ -323,7 +327,7 @@ function buildNewsletterHtml(title, content, template = 'default') {
         .event-highlight { background: #fef3c7; padding: 15px; border-left: 4px solid #f59e0b; margin: 20px 0; }
       </style>
     `,
-    default: ''
+    default: '',
   };
 
   const headerClass = template === 'default' ? 'header' : `${template}-header`;
@@ -362,27 +366,24 @@ function buildNewsletterHtml(title, content, template = 'default') {
 
 function stripHtml(html) {
   return html
-    .replace(/<[^>]*>/g, '') // Remove HTML tags
-    .replace(/&nbsp;/g, ' ') // Replace &nbsp; with space
-    .replace(/&amp;/g, '&') // Replace &amp; with &
-    .replace(/&lt;/g, '<') // Replace &lt; with <
-    .replace(/&gt;/g, '>') // Replace &gt; with >
-    .replace(/&quot;/g, '"') // Replace &quot; with "
-    .replace(/&#39;/g, "'") // Replace &#39; with '
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
     .trim();
 }
 
-// Test newsletter sending
 async function sendTestNewsletter({ campaign, testEmails }) {
   if (!campaign || !testEmails || testEmails.length === 0) {
     throw new Error('Campaign and test emails are required');
   }
 
-  const testRecipients = testEmails.map(email => ({ email }));
-  return await sendNewsletterCampaign({ campaign, recipients: testRecipients, isTest: true });
+  const testRecipients = testEmails.map((email) => ({ email }));
+  return sendNewsletterCampaign({ campaign, recipients: testRecipients, isTest: true });
 }
 
 module.exports.sendNewsletterCampaign = sendNewsletterCampaign;
 module.exports.sendTestNewsletter = sendTestNewsletter;
-
-
