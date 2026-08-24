@@ -7,6 +7,7 @@ const User = require('../models/User');
 const Workshop = require('../models/Workshop');
 const Event = require('../models/Event');
 const ResearchArea = require('../models/ResearchArea');
+const { getPublicImpactMetrics } = require('../services/impactMetricsService');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { getRedisClient } = require('../config/redis');
 const { getConnectionStatus } = require('../config/database');
@@ -109,148 +110,8 @@ router.get(
       });
     }
 
-    const cacheKey = 'public:impact-metrics:v2';
-    if (isRedisEnabled()) {
-      try {
-        const redis = getRedisClient();
-        const cached = await redis.get(cacheKey);
-        if (cached) {
-          return res.json(JSON.parse(cached));
-        }
-      } catch (_) { /* ignore cache errors */ }
-    }
-
     try {
-      const [
-        projects,
-        publications,
-        labMembers,
-        industryPartners,
-        awardsWon,
-        workshopsConducted
-      ] = await Promise.all([
-        // Count all projects (research projects)
-        Project.countDocuments({ isPublic: true }),
-        
-        // Count publications from multiple sources:
-        // 1. News items tagged as 'publication', 'paper', 'research'
-        // 2. ResearchArea publication counts
-        Promise.all([
-          News.countDocuments({ 
-            isPublished: true,
-            $or: [
-              { tags: { $in: ['publication', 'paper', 'research', 'journal'] } },
-              { 'tags': /publication|paper|research|journal/i }
-            ]
-          }),
-          ResearchArea.aggregate([
-            { $group: { _id: null, totalPublications: { $sum: '$publicationCount' } } }
-          ])
-        ]).then(([newsPublications, researchAreaPublications]) => {
-          const researchAreaCount = researchAreaPublications[0]?.totalPublications || 0;
-          return newsPublications + researchAreaCount;
-        }),
-        
-        // Active lab members (team_member, mentor, researcher roles)
-        User.countDocuments({ 
-          isActive: true, 
-          role: { $in: ['team_member', 'mentor', 'researcher'] } 
-        }),
-        
-        // Industry partners - users with industry-related subroles or achievements
-        User.countDocuments({
-          isActive: true,
-          $or: [
-            { 
-              subroles: { 
-                $in: [
-                  'industry_liaison', 
-                  'partnership_coordinator', 
-                  'business_developer',
-                  'startup_mentor',
-                  'patent_officer',
-                  'technology_transfer'
-                ] 
-              } 
-            },
-            { 
-              'achievements.type': 'patent',
-              'achievements': { $exists: true, $ne: [] }
-            }
-          ]
-        }),
-        
-        // Awards won - from user achievements and project achievements
-        Promise.all([
-          User.aggregate([
-            { 
-              $match: { 
-                'achievements.type': 'award',
-                'achievements': { $exists: true, $ne: [] }
-              }
-            },
-            { $unwind: '$achievements' },
-            { $match: { 'achievements.type': 'award' } },
-            { $count: 'totalAwards' }
-          ]),
-          Project.aggregate([
-            { $match: { achievements: { $exists: true, $ne: [] } } },
-            { $unwind: '$achievements' },
-            { $count: 'totalAwards' }
-          ])
-        ]).then(([userAwards, projectAwards]) => {
-          const userAwardCount = userAwards[0]?.totalAwards || 0;
-          const projectAwardCount = projectAwards[0]?.totalAwards || 0;
-          return userAwardCount + projectAwardCount;
-        }),
-        
-        // Workshops conducted (completed workshops)
-        // Count both:
-        // 1. Workshops from Workshop model (status: 'completed')
-        // 2. Events with type 'workshop' (status: 'completed')
-        Promise.all([
-          Workshop.countDocuments({ status: 'completed' }),
-          Event.countDocuments({ type: 'workshop', status: 'completed' })
-        ]).then(([workshopCount, eventWorkshopCount]) => {
-          const total = workshopCount + eventWorkshopCount;
-          return total;
-        }).catch((error) => {
-          // Fallback to just Workshop count if Event query fails
-          return Workshop.countDocuments({ status: 'completed' });
-        })
-      ]);
-
-      const payload = {
-        success: true,
-        data: {
-          impactCounts: {
-            projects,
-            publications,
-            labMembers,
-            industryPartners,
-            awardsWon,
-            workshopsConducted
-          },
-          labels: {
-            projects: `${projects}+`,
-            publications: `${publications}+`,
-            labMembers: `${labMembers}+`,
-            industryPartners: `${industryPartners}+`,
-            awardsWon: `${awardsWon}+`,
-            workshopsConducted: `${workshopsConducted}+`
-          },
-          lastUpdated: new Date().toISOString()
-        }
-      };
-
-      // Cache the result for 5 minutes
-      if (isRedisEnabled()) {
-        try {
-          const redis = getRedisClient();
-          await redis.setEx(cacheKey, 300, JSON.stringify(payload));
-        } catch (_) { /* ignore cache errors */ }
-      }
-
+      const payload = await getPublicImpactMetrics();
       return res.json(payload);
     } catch (error) {
       const isInitError = /before initial connection is complete/i.test(error?.message || '');

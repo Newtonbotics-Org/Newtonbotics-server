@@ -38,6 +38,7 @@ const pastLeaderRoutes = require('./routes/pastLeaders');
 const adminDashboardRoutes = require('./routes/adminDashboard');
 const subroleRoutes = require('./routes/subroles');
 const attendanceRoutes = require('./routes/attendance');
+const impactMetricsRoutes = require('./routes/impactMetrics');
 const envVaultRoutes = require('./routes/envVault');
 const { default: mongoose } = require('mongoose');
 const ContactSubmission = require('./models/ContactSubmission');
@@ -168,6 +169,7 @@ app.use('/api/past-leaders', pastLeaderRoutes);
 app.use('/api/admin/dashboard', adminDashboardRoutes);
 app.use('/api/subroles', subroleRoutes);
 app.use('/api/attendance', attendanceRoutes);
+app.use('/api/impact-metrics', impactMetricsRoutes);
 app.use('/api/env-vault', envVaultRoutes);
 
 // Error handling middleware
