@@ -1,11 +1,24 @@
 const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const router = express.Router();
-const { optionalAuth, verifyToken, requireTeamMember, requireMentor, requireAdmin, requireProjectLeaderOrOwner } = require('../middleware/auth');
+const { optionalAuth, verifyToken, requireTeamMember, requireMentor, requireAdmin, requireProjectLeaderOrOwner, isLabMember } = require('../middleware/auth');
 const Media = require('../models/Media');
 const MediaCategory = require('../models/MediaCategory');
 const MediaCollection = require('../models/MediaCollection');
-const { asyncHandler, validationErrorHandler, notFoundErrorHandler } = require('../middleware/errorHandler');
+const { asyncHandler, validationErrorHandler, notFoundErrorHandler, authorizationErrorHandler } = require('../middleware/errorHandler');
+
+const applyLabMembersOnlyFilter = (filter, user) => {
+  if (!isLabMember(user)) {
+    filter.labMembersOnly = { $ne: true };
+  }
+  return filter;
+};
+
+const assertCanViewMedia = (item, user) => {
+  if (item.labMembersOnly && !isLabMember(user)) {
+    throw authorizationErrorHandler('This media is only available to signed-in lab members');
+  }
+};
 
 // TODO: Implement media routes
 // - GET /api/media - List media files
@@ -47,6 +60,7 @@ router.get(
     if (fileType) filter.fileType = fileType;
     if (categoryId) filter.categoryId = categoryId;
     if (q) filter.title = { $regex: q, $options: 'i' };
+    applyLabMembersOnlyFilter(filter, req.user);
     const [items, total] = await Promise.all([
       Media.find(filter).limit(limit).skip(skip).sort({ createdAt: -1 }),
       Media.countDocuments(filter),
@@ -66,6 +80,7 @@ router.get(
     
     const item = await Media.findById(req.params.id);
     if (!item) throw notFoundErrorHandler('Media');
+    assertCanViewMedia(item, req.user);
     
     // Increment view count (best-effort, non-blocking)
     Media.findByIdAndUpdate(item._id, { $inc: { viewCount: 1 } }).catch(() => {});
@@ -85,6 +100,7 @@ router.post(
     
     const item = await Media.findById(req.params.id);
     if (!item) throw notFoundErrorHandler('Media');
+    assertCanViewMedia(item, req.user);
     
     // Increment view count
     const updated = await Media.findByIdAndUpdate(
@@ -110,6 +126,7 @@ router.post(
     body('fileUrl').isString(),
     body('fileType').isIn(['image', 'video', 'document', 'audio']),
     body('uploadedBy').isString(),
+    body('labMembersOnly').optional().isBoolean().toBoolean(),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
