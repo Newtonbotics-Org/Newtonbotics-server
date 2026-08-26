@@ -417,6 +417,13 @@ const requireWorkshopInstructor = asyncHandler(async (req, res, next) => {
 });
 
 // Rate limiting for authentication endpoints
+const LAB_MEMBER_ROLES = ['team_member', 'mentor', 'researcher', 'admin'];
+
+const isLabMember = (user) => {
+  if (!user?.role) return false;
+  return LAB_MEMBER_ROLES.includes(String(user.role).toLowerCase());
+};
+
 const authRateLimit = require('express-rate-limit')({
   windowMs: parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
   max: parseInt(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS) || 5, // limit each IP to 5 requests per windowMs
@@ -445,4 +452,6 @@ module.exports = {
   requireProjectLeaderOrOwner,
   requireWorkshopInstructor,
   authRateLimit,
+  isLabMember,
+  LAB_MEMBER_ROLES,
 };

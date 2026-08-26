@@ -14,6 +14,7 @@ const mediaSchema = new mongoose.Schema(
     uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     tags: [{ type: String, maxlength: 100 }],
     isFeatured: { type: Boolean, default: false },
+    labMembersOnly: { type: Boolean, default: false },
     viewCount: { type: Number, default: 0, min: 0 },
   },
   { timestamps: { createdAt: 'createdAt', updatedAt: 'updatedAt' } }
