@@ -21,9 +21,12 @@ const notFoundHandler = require('./middleware/notFoundHandler');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const projectRoutes = require('./routes/projects');
+const projectComponentRoutes = require('./routes/projectComponents');
+const componentRequestRoutes = require('./routes/componentRequests');
 const workshopRoutes = require('./routes/workshops');
 const eventRoutes = require('./routes/events');
 const inventoryRoutes = require('./routes/inventory');
+const projectInventoryRoutes = require('./routes/projectInventory');
 const projectRequestRoutes = require('./routes/projectRequests');
 const newsRoutes = require('./routes/news');
 const newsletterRoutes = require('./routes/newsletter');
@@ -151,10 +154,13 @@ app.get('/health', async (req, res) => {
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/projects', projectComponentRoutes);
+app.use('/api/component-requests', componentRequestRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/workshops', workshopRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/inventory', inventoryRoutes);
+app.use('/api/inventory', projectInventoryRoutes);
 app.use('/api/project-requests', projectRequestRoutes);
 app.use('/api/news', newsRoutes);
 app.use('/api/newsletter', newsletterRoutes);
