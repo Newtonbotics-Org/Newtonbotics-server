@@ -1,12 +1,46 @@
 const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const router = express.Router();
-const { optionalAuth, verifyToken, requireTeamMember, requireMentor, requireAdmin } = require('../middleware/auth');
+const { optionalAuth, verifyToken, requireTeamMember, requireAdmin } = require('../middleware/auth');
 const { sendInventoryCheckoutEmail } = require('../services/emailService');
 const Equipment = require('../models/Equipment');
 const EquipmentCategory = require('../models/EquipmentCategory');
 const { asyncHandler, validationErrorHandler, notFoundErrorHandler } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
+
+const equipmentFields = [
+  'name', 'description', 'categoryId', 'modelNumber', 'serialNumber', 'manufacturer',
+  'purchaseDate', 'purchasePrice', 'currentQuantity', 'minQuantity', 'maxQuantity',
+  'location', 'status', 'imageUrl', 'specifications', 'maintenanceSchedule',
+  'lastMaintenanceDate', 'nextMaintenanceDate',
+];
+
+const equipmentOptionalValidators = [
+  body('name').optional().isString().trim().isLength({ min: 2, max: 255 }),
+  body('description').optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
+  body('categoryId').optional().isMongoId(),
+  body('modelNumber').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
+  body('serialNumber').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
+  body('manufacturer').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
+  body('purchaseDate').optional({ nullable: true }).isISO8601().toDate(),
+  body('purchasePrice').optional({ nullable: true }).isFloat({ min: 0 }).toFloat(),
+  body('currentQuantity').optional().isInt({ min: 0 }).toInt(),
+  body('minQuantity').optional().isInt({ min: 0 }).toInt(),
+  body('maxQuantity').optional({ nullable: true }).isInt({ min: 0 }).toInt(),
+  body('location').optional({ nullable: true }).isString().trim().isLength({ max: 255 }),
+  body('status').optional().isIn(['available', 'low_stock', 'out_of_stock', 'maintenance', 'retired']),
+  body('imageUrl').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
+  body('specifications').optional().isObject(),
+  body('maintenanceSchedule').optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+  body('lastMaintenanceDate').optional({ nullable: true }).isISO8601().toDate(),
+  body('nextMaintenanceDate').optional({ nullable: true }).isISO8601().toDate(),
+];
+
+function pickEquipmentFields(input) {
+  return Object.fromEntries(equipmentFields
+    .filter((field) => Object.prototype.hasOwnProperty.call(input, field))
+    .map((field) => [field, input[field]]));
+}
 
 // TODO: Implement inventory routes
 // - GET /api/inventory/equipment - List equipment
@@ -24,9 +58,9 @@ router.get(
   '/equipment',
   optionalAuth,
   [
-    query('categoryId').optional().isString(),
+    query('categoryId').optional().isMongoId(),
     query('status').optional().isIn(['available', 'low_stock', 'out_of_stock', 'maintenance', 'retired']),
-    query('q').optional().isString(),
+    query('q').optional().isString().trim().isLength({ max: 100 }),
     query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
     query('skip').optional().isInt({ min: 0 }).toInt(),
   ],
@@ -37,7 +71,7 @@ router.get(
     const filter = {};
     if (categoryId) filter.categoryId = categoryId;
     if (status) filter.status = status;
-    if (q) filter.name = { $regex: q, $options: 'i' };
+    if (q) filter.name = { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' };
     const [items, total] = await Promise.all([
       Equipment.find(filter).limit(limit).skip(skip).sort({ createdAt: -1 }),
       Equipment.countDocuments(filter),
@@ -49,7 +83,12 @@ router.get(
 // Equipment get by id
 router.get(
   '/equipment/:id',
-  [param('id').isString()],
+  [param('id').isMongoId()],
+  asyncHandler(async (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return next(validationErrorHandler(errors));
+    return next();
+  }),
   asyncHandler(async (req, res) => {
     const eq = await Equipment.findById(req.params.id);
     if (!eq) throw notFoundErrorHandler('Equipment');
@@ -57,21 +96,21 @@ router.get(
   })
 );
 
-// Create/update restricted to team members or higher; delete to mentor/admin
+// Component management is handled through the admin dashboard.
 router.post(
   '/equipment',
   verifyToken,
-  requireTeamMember,
+  requireAdmin,
   [
-    body('name').isString().isLength({ min: 2, max: 255 }),
-    body('categoryId').isString(),
-    body('currentQuantity').optional().isInt({ min: 0 }).toInt(),
-    body('status').optional().isIn(['available', 'low_stock', 'out_of_stock', 'maintenance', 'retired']),
+    body('name').isString().trim().isLength({ min: 2, max: 255 }),
+    body('categoryId').isMongoId(),
+    ...equipmentOptionalValidators,
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) throw validationErrorHandler(errors);
-    const created = await Equipment.create(req.body);
+    if (!(await EquipmentCategory.exists({ _id: req.body.categoryId }))) throw notFoundErrorHandler('Category');
+    const created = await Equipment.create(pickEquipmentFields(req.body));
     res.status(201).json({ success: true, message: 'Equipment created', data: { item: created } });
   })
 );
@@ -79,10 +118,15 @@ router.post(
 router.put(
   '/equipment/:id',
   verifyToken,
-  requireTeamMember,
-  [param('id').isString()],
+  requireAdmin,
+  [param('id').isMongoId(), ...equipmentOptionalValidators],
   asyncHandler(async (req, res) => {
-    const updated = await Equipment.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) throw validationErrorHandler(errors);
+    const changes = pickEquipmentFields(req.body);
+    if (!Object.keys(changes).length) return res.status(400).json({ success: false, message: 'At least one equipment field is required' });
+    if (changes.categoryId && !(await EquipmentCategory.exists({ _id: changes.categoryId }))) throw notFoundErrorHandler('Category');
+    const updated = await Equipment.findByIdAndUpdate(req.params.id, changes, { new: true, runValidators: true });
     if (!updated) throw notFoundErrorHandler('Equipment');
     res.json({ success: true, message: 'Equipment updated', data: { item: updated } });
   })
@@ -91,9 +135,11 @@ router.put(
 router.delete(
   '/equipment/:id',
   verifyToken,
-  requireMentor,
-  [param('id').isString()],
+  requireAdmin,
+  [param('id').isMongoId()],
   asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) throw validationErrorHandler(errors);
     const deleted = await Equipment.findByIdAndDelete(req.params.id);
     if (!deleted) throw notFoundErrorHandler('Equipment');
     res.json({ success: true, message: 'Equipment deleted' });
@@ -618,20 +664,44 @@ router.get('/categories', optionalAuth, asyncHandler(async (req, res) => {
   res.json({ success: true, data: { items } });
 }));
 
-router.post('/categories', verifyToken, requireTeamMember, [body('name').isString().isLength({ min: 2, max: 100 })], asyncHandler(async (req, res) => {
+router.post('/categories', verifyToken, requireAdmin, [
+  body('name').isString().trim().isLength({ min: 2, max: 100 }),
+  body('description').optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+  body('parentCategoryId').optional({ nullable: true, checkFalsy: true }).isMongoId(),
+], asyncHandler(async (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) throw validationErrorHandler(errors);
-  const created = await EquipmentCategory.create({ name: req.body.name, description: req.body.description, parentCategoryId: req.body.parentCategoryId });
+  if (req.body.parentCategoryId && !(await EquipmentCategory.exists({ _id: req.body.parentCategoryId }))) throw notFoundErrorHandler('Parent category');
+  const created = await EquipmentCategory.create({
+    name: req.body.name,
+    description: req.body.description,
+    parentCategoryId: req.body.parentCategoryId || undefined,
+  });
   res.status(201).json({ success: true, message: 'Category created', data: { item: created } });
 }));
 
-router.put('/categories/:id', verifyToken, requireTeamMember, [param('id').isString()], asyncHandler(async (req, res) => {
-  const updated = await EquipmentCategory.findByIdAndUpdate(req.params.id, req.body, { new: true });
+router.put('/categories/:id', verifyToken, requireAdmin, [
+  param('id').isMongoId(),
+  body('name').optional().isString().trim().isLength({ min: 2, max: 100 }),
+  body('description').optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+  body('parentCategoryId').optional({ nullable: true, checkFalsy: true }).isMongoId(),
+], asyncHandler(async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw validationErrorHandler(errors);
+  const changes = {};
+  ['name', 'description', 'parentCategoryId'].forEach((field) => {
+    if (Object.prototype.hasOwnProperty.call(req.body, field)) changes[field] = req.body[field];
+  });
+  if (!Object.keys(changes).length) return res.status(400).json({ success: false, message: 'At least one category field is required' });
+  if (changes.parentCategoryId && !(await EquipmentCategory.exists({ _id: changes.parentCategoryId }))) throw notFoundErrorHandler('Parent category');
+  const updated = await EquipmentCategory.findByIdAndUpdate(req.params.id, changes, { new: true, runValidators: true });
   if (!updated) throw notFoundErrorHandler('Category');
   res.json({ success: true, message: 'Category updated', data: { item: updated } });
 }));
 
-router.delete('/categories/:id', verifyToken, requireMentor, [param('id').isString()], asyncHandler(async (req, res) => {
+router.delete('/categories/:id', verifyToken, requireAdmin, [param('id').isMongoId()], asyncHandler(async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) throw validationErrorHandler(errors);
   const deleted = await EquipmentCategory.findByIdAndDelete(req.params.id);
   if (!deleted) throw notFoundErrorHandler('Category');
   res.json({ success: true, message: 'Category deleted' });
