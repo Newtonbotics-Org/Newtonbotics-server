@@ -74,9 +74,11 @@ router.post(
   loadProjectForAdmin,
   asyncHandler(async (req, res) => {
     const { name, category, quantity, minimumQuantity = 0, location, description } = req.body;
+    const normalizedName = name.trim();
     const item = await ProjectComponent.create({
       projectId: req.project._id,
-      name,
+      name: normalizedName,
+      nameKey: normalizedName.toLowerCase(),
       category,
       quantity,
       minimumQuantity,
@@ -107,6 +109,10 @@ router.put(
     const changes = Object.fromEntries(Object.entries(req.body).filter(([key]) => allowed.includes(key)));
     if (!Object.keys(changes).length) {
       return res.status(400).json({ success: false, message: 'At least one component field is required' });
+    }
+    if (Object.prototype.hasOwnProperty.call(changes, 'name')) {
+      changes.name = changes.name.trim();
+      changes.nameKey = changes.name.toLowerCase();
     }
     const item = await ProjectComponent.findOneAndUpdate(
       { _id: req.params.componentId, projectId: req.project._id, isDeleted: false },
