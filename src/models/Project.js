@@ -427,17 +427,17 @@ projectSchema.virtual('isOverdue').get(function() {
 
 // Virtual for completed milestones count
 projectSchema.virtual('completedMilestonesCount').get(function() {
-  return this.milestones.filter(milestone => milestone.status === 'completed').length;
+  return (this.milestones || []).filter(milestone => milestone.status === 'completed').length;
 });
 
 // Virtual for total milestones count
 projectSchema.virtual('totalMilestonesCount').get(function() {
-  return this.milestones.length;
+  return (this.milestones || []).length;
 });
 
 // Virtual for team size
 projectSchema.virtual('teamSize').get(function() {
-  return this.teamMembers.length + 1; // +1 for team leader
+  return (this.teamMembers || []).length + 1; // +1 for team leader
 });
 
 // Indexes for performance
