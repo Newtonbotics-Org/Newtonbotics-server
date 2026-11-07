@@ -3,10 +3,58 @@ const { body, param, query, validationResult } = require('express-validator');
 const router = express.Router();
 const { optionalAuth, verifyToken, requireTeamMember, requireMentor, requireAdmin } = require('../middleware/auth');
 const ProjectRequest = require('../models/ProjectRequest');
+const Project = require('../models/Project');
 const { sendProjectRequestStatusEmail } = require('../services/emailService');
 const User = require('../models/User');
 const { asyncHandler, validationErrorHandler, notFoundErrorHandler, authorizationErrorHandler } = require('../middleware/errorHandler');
 const { uploadProjectDocument } = require('../utils/upload');
+
+const projectRequestFieldValidators = [
+  body('title').optional().isString().isLength({ min: 5, max: 255 }),
+  body('description').optional().isString().isLength({ min: 20, max: 5000 }),
+  body('teamSize').optional().isInt({ min: 1, max: 20 }).toInt(),
+  body('estimatedDurationMonths').optional().isInt({ min: 1, max: 24 }).toInt(),
+  body('category').optional().isString().isLength({ max: 100 }).trim(),
+  body('projectStatus').optional().isIn(['upcoming', 'ongoing', 'completed', 'on_hold']).bail().custom((status, { req }) => {
+    if (status === 'completed' && !req.body.startDate) throw new Error('Start date is required for completed projects');
+    return true;
+  }),
+  body('priority').optional().isIn(['low', 'medium', 'high', 'critical']),
+  body('difficulty').optional().isIn(['beginner', 'intermediate', 'advanced', 'expert']),
+  body('startDate').optional({ checkFalsy: true }).isISO8601().toDate(),
+  body('endDate').optional({ checkFalsy: true }).isISO8601().toDate().bail().custom((endDate, { req }) => {
+    if (req.body.startDate && endDate <= new Date(req.body.startDate)) throw new Error('End date must be after start date');
+    return true;
+  }),
+  body('budget').optional({ checkFalsy: true }).isFloat({ min: 0 }).toFloat(),
+  body('estimatedHours').optional({ checkFalsy: true }).isInt({ min: 1 }).toInt(),
+  body('teamLeaderId').optional({ checkFalsy: true }).isMongoId(),
+  body('mentorId').optional({ checkFalsy: true }).isMongoId(),
+  body('imageUrl').optional({ checkFalsy: true }).matches(/^https?:\/\/.+\.(jpg|jpeg|png|gif|webp)$/i).isLength({ max: 500 }),
+  body('videoUrl').optional({ checkFalsy: true }).matches(/^https?:\/\/(www\.)?(youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com)\/.+/i).isLength({ max: 500 }),
+  body('githubUrl').optional({ checkFalsy: true }).matches(/^https?:\/\/(www\.)?github\.com\/.+/i).isLength({ max: 500 }),
+  body('documentationUrl').optional({ checkFalsy: true }).isURL({ protocols: ['http', 'https'], require_protocol: true }).isLength({ max: 500 }),
+  body('achievements').optional().isArray({ max: 50 }),
+  body('achievements.*').optional().isString().isLength({ max: 500 }),
+  body('tags').optional().isArray({ max: 50 }),
+  body('tags.*').optional().isString().isLength({ max: 50 }),
+  body('teamMembers').optional().isArray({ max: 20 }),
+  body('teamMembers.*.userId').isMongoId(),
+  body('teamMembers.*.proposedRole').isString().isLength({ min: 1, max: 100 }),
+  body('teamMembers.*.availabilityHoursPerWeek').optional({ checkFalsy: true }).isInt({ min: 1, max: 40 }).toInt(),
+  body('teamMembers.*.skills').optional().isArray({ max: 20 }),
+  body('teamMembers.*.skills.*').optional().isString().isLength({ max: 100 }),
+  body('teamMembers.*.responsibilities').optional().isArray({ max: 20 }),
+  body('teamMembers.*.responsibilities.*').optional().isString().isLength({ max: 200 }),
+  body('teamMembers.*.contribution').optional().isString().isLength({ max: 1000 }),
+];
+const projectRequestCreateValidators = [
+  ...projectRequestFieldValidators,
+  body('title').exists().withMessage('Title is required').bail().isString().isLength({ min: 5, max: 255 }),
+  body('description').exists().withMessage('Description is required').bail().isString().isLength({ min: 20, max: 5000 }),
+  body('teamSize').exists().withMessage('Team size is required').bail().isInt({ min: 1, max: 20 }).toInt(),
+  body('estimatedDurationMonths').exists().withMessage('Estimated duration is required').bail().isInt({ min: 1, max: 24 }).toInt(),
+];
 
 // Project requests routes - allows any authenticated user to submit project ideas
 // - GET /api/project-requests - List project requests
@@ -43,6 +91,7 @@ router.get(
       ProjectRequest.find(filter)
         .populate('submittedBy', 'firstName lastName email role')
         .populate('mentorId', 'firstName lastName email role')
+        .populate('teamLeaderId', 'firstName lastName email role')
         .limit(limit)
         .skip(skip)
         .sort({ submittedAt: -1 }),
@@ -71,6 +120,7 @@ router.get('/my-requests', verifyToken, [
   const [items, total] = await Promise.all([
     ProjectRequest.find(filter)
       .populate('mentorId', 'firstName lastName email role')
+      .populate('teamLeaderId', 'firstName lastName email role')
       .populate('teamMembers.userId', 'firstName lastName email role')
       .limit(limit)
       .skip(skip)
@@ -158,6 +208,7 @@ router.get('/:id', [param('id').isString()], asyncHandler(async (req, res) => {
   const item = await ProjectRequest.findById(req.params.id)
     .populate('submittedBy', 'firstName lastName email role')
     .populate('mentorId', 'firstName lastName email role')
+    .populate('teamLeaderId', 'firstName lastName email role')
     .populate('teamMembers.userId', 'firstName lastName email role');
   if (!item) throw notFoundErrorHandler('ProjectRequest');
   res.json({ success: true, data: { item } });
@@ -256,17 +307,16 @@ router.post(
       next();
     });
   },
-  [
-    body('title').isString().isLength({ min: 5, max: 255 }),
-    body('description').isString().isLength({ min: 20, max: 5000 }),
-    body('teamSize').isInt({ min: 1, max: 20 }).toInt(),
-    body('estimatedDurationMonths').isInt({ min: 1, max: 24 }).toInt(),
-  ],
+  projectRequestCreateValidators,
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) throw validationErrorHandler(errors);
     
-    const payload = { ...req.body, submittedBy: req.user.id, submittedAt: new Date() };
+    const payload = { ...req.body, submittedBy: req.user.id, submittedAt: new Date(), status: 'pending' };
+    delete payload.isPublic;
+    delete payload.isFeatured;
+    delete payload.projectId;
+    delete payload.sourceProjectRequestId;
     
     // Handle document - supports both Cloudinary (JSON) and local file upload
     if (req.file) {
@@ -386,7 +436,10 @@ router.put('/:id', verifyToken, [param('id').isString()],
       next();
     });
   },
+  projectRequestFieldValidators,
   asyncHandler(async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) throw validationErrorHandler(errors);
     const projectRequest = await ProjectRequest.findById(req.params.id);
     if (!projectRequest) throw notFoundErrorHandler('ProjectRequest');
     
@@ -420,6 +473,10 @@ router.put('/:id', verifyToken, [param('id').isString()],
     // Track changes for audit trail
     const changes = [];
     const updateData = { ...req.body };
+    delete updateData.isPublic;
+    delete updateData.isFeatured;
+    delete updateData.projectId;
+    delete updateData.sourceProjectRequestId;
     
     // Handle document update - supports both Cloudinary (JSON) and local file upload
     if (req.file) {
@@ -535,6 +592,13 @@ router.put('/:id', verifyToken, [param('id').isString()],
     
     // Special handling for status updates: Admin can always update status, even on approved projects
     const isStatusUpdate = updateData.status !== undefined && updateData.status !== projectRequest.status;
+
+    if (updateData.status === 'approved' && projectRequest.status !== 'approved') {
+      return res.status(400).json({ success: false, message: 'Use the approval endpoint to approve a project request.' });
+    }
+    if (isStatusUpdate && !isMentorOrHigher) {
+      throw authorizationErrorHandler('Only mentors and administrators can change project request status.');
+    }
     
     // If updating status on an approved project, only admin can do this
     if (isStatusUpdate && projectRequest.status === 'approved' && !isAdmin) {
@@ -569,29 +633,103 @@ router.put('/:id', verifyToken, [param('id').isString()],
   })
 );
 
-router.post('/:id/approve', verifyToken, requireMentor, async (req, res) => {
-  const pr = await ProjectRequest.findById(req.params.id);
-  if (!pr) return res.status(404).json({ success: false, message: 'Request not found' });
-  
-  const oldStatus = pr.status;
-  pr.status = 'approved';
-  pr.approvalDate = new Date();
-  
-  // Add audit trail entry for approval
-  pr.addAuditEntry('approved', req.user.id, {
-    field: 'status',
-    oldValue: oldStatus,
-    newValue: 'approved'
-  }, req.body.reason || 'Project request approved', req);
-  
-  await pr.save();
-  
+router.post('/:id/approve', verifyToken, requireMentor, asyncHandler(async (req, res) => {
+  const session = await ProjectRequest.startSession();
+  let approvedRequest;
+  let createdProject;
+  let alreadyApproved = false;
+
   try {
-    const submitter = await User.findById(pr.submittedBy);
-    await sendProjectRequestStatusEmail({ request: pr.toObject(), newStatus: 'approved', recipientEmail: submitter?.email });
-  } catch (_) {}
-  res.json({ success: true, message: 'Request approved', data: { request: pr } });
-});
+    await session.withTransaction(async () => {
+      const projectRequest = await ProjectRequest.findById(req.params.id).session(session);
+      if (!projectRequest) throw notFoundErrorHandler('ProjectRequest');
+
+      if (projectRequest.status === 'approved') {
+        alreadyApproved = true;
+        createdProject = projectRequest.projectId
+          ? await Project.findById(projectRequest.projectId).session(session)
+          : await Project.findOne({ sourceProjectRequestId: projectRequest._id }).session(session);
+        approvedRequest = projectRequest;
+        return;
+      }
+
+      const teamMembers = await Promise.all(projectRequest.teamMembers.map(async (member) => {
+        const user = await User.findById(member.userId).session(session);
+        if (!user) throw new Error(`Team member ${member.userId} was not found`);
+        return {
+          userId: member.userId,
+          userName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email,
+          role: member.proposedRole,
+          skills: member.skills,
+          responsibilities: member.responsibilities,
+          contribution: member.contribution,
+          timeCommitment: { hoursPerWeek: member.availabilityHoursPerWeek }
+        };
+      }));
+
+      const project = new Project({
+        sourceProjectRequestId: projectRequest._id,
+        title: projectRequest.title,
+        description: projectRequest.description,
+        category: projectRequest.category,
+        status: projectRequest.projectStatus || 'upcoming',
+        priority: projectRequest.priority || 'medium',
+        difficulty: projectRequest.difficulty || 'intermediate',
+        startDate: projectRequest.startDate,
+        endDate: projectRequest.endDate,
+        budget: projectRequest.budget ?? projectRequest.budgetEstimate,
+        estimatedHours: projectRequest.estimatedHours,
+        teamLeaderId: projectRequest.teamLeaderId || req.user.id,
+        mentorId: projectRequest.mentorId,
+        imageUrl: projectRequest.imageUrl,
+        videoUrl: projectRequest.videoUrl,
+        githubUrl: projectRequest.githubUrl,
+        documentationUrl: projectRequest.documentationUrl,
+        achievements: projectRequest.achievements,
+        tags: projectRequest.tags,
+        teamMembers,
+        allTeamMembers: teamMembers.map((member) => ({
+          userId: member.userId,
+          name: member.userName,
+          role: member.role,
+          contribution: member.contribution,
+        }))
+      });
+      await project.save({ session });
+
+      const oldStatus = projectRequest.status;
+      projectRequest.status = 'approved';
+      projectRequest.projectId = project._id;
+      projectRequest.approvalDate = new Date();
+      projectRequest.reviewedAt = projectRequest.approvalDate;
+      projectRequest.reviewedBy = req.user.id;
+      projectRequest.addAuditEntry('approved', req.user.id, {
+        field: 'status',
+        oldValue: oldStatus,
+        newValue: 'approved'
+      }, req.body.reason || 'Project request approved', req);
+      await projectRequest.save({ session });
+
+      approvedRequest = projectRequest;
+      createdProject = project;
+    });
+  } finally {
+    await session.endSession();
+  }
+
+  if (!alreadyApproved) {
+    try {
+      const submitter = await User.findById(approvedRequest.submittedBy);
+      await sendProjectRequestStatusEmail({ request: approvedRequest.toObject(), newStatus: 'approved', recipientEmail: submitter?.email });
+    } catch (_) {}
+  }
+
+  res.json({
+    success: true,
+    message: alreadyApproved ? 'Request was already approved' : 'Request approved and project created',
+    data: { request: approvedRequest, project: createdProject }
+  });
+}));
 
 router.post('/:id/reject', verifyToken, requireMentor, async (req, res) => {
   const pr = await ProjectRequest.findById(req.params.id);

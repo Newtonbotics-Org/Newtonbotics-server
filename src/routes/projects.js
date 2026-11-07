@@ -11,7 +11,7 @@ const {
   requireProjectTeamMember,
   requireProjectLeaderAccess,
 } = require('../middleware/auth');
-const { asyncHandler, validationErrorHandler, notFoundErrorHandler } = require('../middleware/errorHandler');
+const { asyncHandler, validationErrorHandler, notFoundErrorHandler, authorizationErrorHandler } = require('../middleware/errorHandler');
 const Project = require('../models/Project');
 const User = require('../models/User');
 const { sendProjectCreatedNotification, sendProjectStatusChangedEmail } = require('../services/emailService');
@@ -30,6 +30,7 @@ router.get(
     query('category').optional().isString().isLength({ min: 1, max: 100 }),
     query('mentorId').optional().isString(),
     query('teamLeaderId').optional().isString(),
+    query('isFeatured').optional().isBoolean().toBoolean(),
     query('limit').optional().isInt({ min: 1, max: 100 }).toInt(),
     query('skip').optional().isInt({ min: 0 }).toInt(),
     query('sort').optional().isIn(['createdAt', 'startDate', 'endDate', 'progress']).default('createdAt'),
@@ -45,18 +46,20 @@ router.get(
       category,
       mentorId,
       teamLeaderId,
+      isFeatured,
       limit = 20,
       skip = 0,
       sort = 'createdAt',
       order = 'desc',
     } = req.query;
 
-    const filter = {};
+    const filter = req.user?.role === 'admin' ? {} : { isPublic: true };
     if (q) filter.$text = { $search: q };
     if (status) filter.status = status;
     if (category) filter.category = category;
     if (mentorId && ensureObjectId(mentorId)) filter.mentorId = ensureObjectId(mentorId);
     if (teamLeaderId && ensureObjectId(teamLeaderId)) filter.teamLeaderId = ensureObjectId(teamLeaderId);
+    if (isFeatured !== undefined) filter.isFeatured = isFeatured;
 
     const sortSpec = { [sort]: order === 'asc' ? 1 : -1 };
 
@@ -84,14 +87,15 @@ router.get(
 // GET /api/projects/:id - details
 router.get(
   '/:id',
+  optionalAuth,
   [param('id').isString()],
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const objId = ensureObjectId(id);
     if (!objId) throw notFoundErrorHandler('Project');
     // Atomically increment view count and return updated doc
-    const project = await Project.findByIdAndUpdate(
-      objId,
+    const project = await Project.findOneAndUpdate(
+      req.user?.role === 'admin' ? { _id: objId } : { _id: objId, isPublic: true },
       { $inc: { viewCount: 1 } },
       { new: true }
     )
@@ -117,6 +121,8 @@ router.post(
     body('budget').optional().isFloat({ min: 0 }),
     body('mentorId').optional().isString(),
     body('teamLeaderId').isString(),
+    body('isPublic').optional().isBoolean().toBoolean(),
+    body('isFeatured').optional().isBoolean().toBoolean(),
     body('teamMembers').optional().isArray(),
     body('teamMembers.*.userId').optional().isString(),
     body('teamMembers.*.role').optional().isString().isLength({ min: 2, max: 100 }),
@@ -146,6 +152,10 @@ router.post(
       tags,
     } = req.body;
 
+    if (req.user.role !== 'admin' && (req.body.isPublic !== undefined || req.body.isFeatured !== undefined)) {
+      throw authorizationErrorHandler('Only administrators can set project visibility or featured status.');
+    }
+
     const newProject = await Project.create({
       title,
       description,
@@ -162,6 +172,7 @@ router.post(
       documentationUrl,
       achievements,
       tags,
+      ...(req.user.role === 'admin' ? { isPublic: req.body.isPublic, isFeatured: req.body.isFeatured } : {}),
     });
 
     // Add team members if provided
@@ -226,6 +237,8 @@ router.put(
     body('documentationUrl').optional().isString(),
     body('achievements').optional().isArray(),
     body('tags').optional().isArray(),
+    body('isPublic').optional().isBoolean().toBoolean(),
+    body('isFeatured').optional().isBoolean().toBoolean(),
   ],
   asyncHandler(async (req, res) => {
     const errors = validationResult(req);
@@ -235,6 +248,9 @@ router.put(
     if (!objId) throw notFoundErrorHandler('Project');
 
     const updateData = { ...req.body };
+    if (req.user.role !== 'admin' && (updateData.isPublic !== undefined || updateData.isFeatured !== undefined)) {
+      throw authorizationErrorHandler('Only administrators can change project visibility or featured status.');
+    }
     if (updateData.mentorId) {
       updateData.mentorId = ensureObjectId(updateData.mentorId);
     }

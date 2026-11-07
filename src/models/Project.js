@@ -2,6 +2,10 @@ const mongoose = require('mongoose');
 const logger = require('../utils/logger');
 
 const projectSchema = new mongoose.Schema({
+  sourceProjectRequestId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'ProjectRequest'
+  },
   title: {
     type: String,
     required: [true, 'Project title is required'],
@@ -168,6 +172,11 @@ const projectSchema = new mongoose.Schema({
       trim: true,
       maxlength: [200, 'Responsibility cannot exceed 200 characters']
     }],
+    contribution: {
+      type: String,
+      trim: true,
+      maxlength: [1000, 'Contribution description cannot exceed 1000 characters']
+    },
     timeCommitment: {
       hoursPerWeek: {
         type: Number,
