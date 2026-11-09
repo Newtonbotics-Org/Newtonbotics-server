@@ -69,6 +69,10 @@ router.get(
   })
 );
 
+router.get('/upload-permission', verifyToken, requireProjectLeaderOrOwner, (req, res) => {
+  res.set('Cache-Control', 'no-store').json({ success: true, data: { canUpload: true } });
+});
+
 // GET /api/media/:id - Get media file details (public)
 router.get(
   '/:id',

@@ -53,6 +53,10 @@ function pickEquipmentFields(input) {
 // - PUT /api/inventory/equipment/:id/return - Return equipment
 // - POST /api/inventory/equipment/:id/urgent-checkout - Urgent checkout (records even if stock insufficient)
 
+router.get('/upload-permission', verifyToken, requireAdmin, (req, res) => {
+  res.set('Cache-Control', 'no-store').json({ success: true, data: { canUpload: true } });
+});
+
 // Equipment list with filters
 router.get(
   '/equipment',
