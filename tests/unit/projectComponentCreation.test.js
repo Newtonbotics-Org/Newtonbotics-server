@@ -11,7 +11,7 @@ jest.mock('../../src/middleware/auth', () => {
   };
   return {
     verifyToken: passThrough,
-    requireAdmin: passThrough,
+    requireAdmin: jest.fn(passThrough),
     requireStudent: passThrough,
     requireProjectTeamMember: passThrough,
     optionalAuth: passThrough,
@@ -22,6 +22,7 @@ jest.mock('../../src/models/Project', () => ({ findById: jest.fn() }));
 jest.mock('../../src/models/ProjectComponent', () => ({ create: jest.fn(), findOneAndUpdate: jest.fn() }));
 
 const projectInventoryRouter = require('../../src/routes/projectInventory');
+const { requireAdmin } = require('../../src/middleware/auth');
 
 const projectId = '507f1f77bcf86cd799439011';
 const componentPayload = { name: '  Servo Motor  ', category: 'Motors', quantity: 2 };
@@ -37,6 +38,10 @@ function createApp() {
 describe('project component creation', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    requireAdmin.mockImplementation((req, res, next) => {
+      req.user = { id: '507f1f77bcf86cd799439012' };
+      next();
+    });
     Project.findById.mockResolvedValue({ _id: projectId });
     ProjectComponent.create.mockImplementation(async (component) => ({
       _id: '507f1f77bcf86cd799439013',
@@ -100,5 +105,58 @@ describe('project component creation', () => {
       expect.objectContaining({ $set: { name: 'Gear Motor', nameKey: 'gear motor' } }),
       expect.any(Object)
     );
+  });
+
+  it('updates detailed equipment metadata without changing component or project identity', async () => {
+    const metadata = {
+      modelNumber: 'M-42',
+      serialNumber: 'S-9',
+      manufacturer: 'Newton Robotics',
+      purchaseDate: '2025-01-02T00:00:00.000Z',
+      purchasePrice: 12.5,
+      imageUrl: 'https://example.test/part.jpg',
+      specifications: { voltage: 5, waterproof: false },
+      maintenanceSchedule: 'Every 6 months',
+      lastMaintenanceDate: '2025-02-03T00:00:00.000Z',
+      nextMaintenanceDate: '2025-08-03T00:00:00.000Z',
+    };
+    const componentId = '507f1f77bcf86cd799439013';
+
+    const response = await request(createApp())
+      .put(`/projects/${projectId}/components/${componentId}`)
+      .send(metadata);
+
+    expect(response.status).toBe(200);
+    expect(ProjectComponent.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: componentId, projectId, isDeleted: false },
+      expect.objectContaining({ $set: expect.objectContaining({
+        ...metadata,
+        purchaseDate: new Date(metadata.purchaseDate),
+        lastMaintenanceDate: new Date(metadata.lastMaintenanceDate),
+        nextMaintenanceDate: new Date(metadata.nextMaintenanceDate),
+      }) }),
+      expect.objectContaining({ new: true, runValidators: true })
+    );
+    expect(response.body.data.item._id).toBe(componentId);
+  });
+
+  it('rejects detailed edits when the admin authorization middleware denies access', async () => {
+    requireAdmin.mockImplementationOnce((req, res) => res.status(403).json({ message: 'Forbidden' }));
+
+    const response = await request(createApp())
+      .put(`/projects/${projectId}/components/507f1f77bcf86cd799439013`)
+      .send({ modelNumber: 'M-42' });
+
+    expect(response.status).toBe(403);
+    expect(ProjectComponent.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it('rejects negative purchase prices without updating the component', async () => {
+    const response = await request(createApp())
+      .put(`/projects/${projectId}/components/507f1f77bcf86cd799439013`)
+      .send({ purchasePrice: -1 });
+
+    expect(response.status).toBe(400);
+    expect(ProjectComponent.findOneAndUpdate).not.toHaveBeenCalled();
   });
 });

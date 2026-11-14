@@ -102,10 +102,27 @@ router.put(
   body('minimumQuantity').optional().isInt({ min: 0 }).toInt(),
   body('location').optional({ nullable: true }).isString().trim().isLength({ max: 255 }),
   body('description').optional({ nullable: true }).isString().trim().isLength({ max: 2000 }),
+  body('modelNumber').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
+  body('serialNumber').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
+  body('manufacturer').optional({ nullable: true }).isString().trim().isLength({ max: 100 }),
+  body('purchaseDate').optional({ nullable: true }).isISO8601().toDate(),
+  body('purchasePrice').optional({ nullable: true }).isFloat({ min: 0 }).toFloat(),
+  body('imageUrl').optional({ nullable: true }).isString().trim().isLength({ max: 500 }),
+  body('specifications').optional().isObject().custom((specifications) => Object.entries(specifications).every(([key, value]) =>
+    key.length <= 100 && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') &&
+    (typeof value !== 'string' || value.length <= 500)
+  )),
+  body('maintenanceSchedule').optional({ nullable: true }).isString().trim().isLength({ max: 1000 }),
+  body('lastMaintenanceDate').optional({ nullable: true }).isISO8601().toDate(),
+  body('nextMaintenanceDate').optional({ nullable: true }).isISO8601().toDate(),
   validateRequest,
   loadProjectForAdmin,
   asyncHandler(async (req, res) => {
-    const allowed = ['name', 'category', 'quantity', 'minimumQuantity', 'location', 'description'];
+    const allowed = [
+      'name', 'category', 'quantity', 'minimumQuantity', 'location', 'description',
+      'modelNumber', 'serialNumber', 'manufacturer', 'purchaseDate', 'purchasePrice',
+      'imageUrl', 'specifications', 'maintenanceSchedule', 'lastMaintenanceDate', 'nextMaintenanceDate',
+    ];
     const changes = Object.fromEntries(Object.entries(req.body).filter(([key]) => allowed.includes(key)));
     if (!Object.keys(changes).length) {
       return res.status(400).json({ success: false, message: 'At least one component field is required' });
