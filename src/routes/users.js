@@ -16,7 +16,7 @@ const {
   requireAdmin 
 } = require('../middleware/auth');
 const logger = require('../utils/logger');
-const { getAcademicYearStatus } = require('../services/academicYearService');
+const { getAcademicYearStatus, isValidAcademicYearSelection } = require('../services/academicYearService');
 const Project = require('../models/Project');
 const Event = require('../models/Event');
 const Workshop = require('../models/Workshop');
@@ -182,6 +182,18 @@ const updateUserValidation = [
       }
       return true;
     })
+];
+
+const updateProfileValidation = [
+  ...updateUserValidation,
+  body().custom((_, { req }) => {
+    const hasAcademicYear = req.body.yearOfStudy !== undefined || req.body.academicStartYear !== undefined;
+    if (req.user.role !== 'student' || !hasAcademicYear) return true;
+    if (!isValidAcademicYearSelection(req.body.yearOfStudy, req.body.academicStartYear)) {
+      throw new Error('A valid academic year and academic start year are required');
+    }
+    return true;
+  }),
 ];
 
 const searchValidation = [
@@ -710,7 +722,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
 // @route   PUT /api/users/profile
 // @desc    Update current user profile
 // @access  Private
-router.put('/profile', updateUserValidation, asyncHandler(async (req, res) => {
+router.put('/profile', updateProfileValidation, asyncHandler(async (req, res) => {
   // Check for validation errors
   const errors = validationResult(req);
   if (!errors.isEmpty()) {

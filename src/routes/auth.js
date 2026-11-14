@@ -5,11 +5,12 @@ const jwt = require('jsonwebtoken');
 const { getRedisClient } = require('../config/redis');
 const isRedisEnabled = () => process.env.REDIS_ENABLED === 'true';
 const User = require('../models/User');
-const { asyncHandler, validationErrorHandler, conflictErrorHandler, authenticationErrorHandler, authorizationErrorHandler } = require('../middleware/errorHandler');
+const { asyncHandler, ApiError, validationErrorHandler, conflictErrorHandler, authenticationErrorHandler, authorizationErrorHandler } = require('../middleware/errorHandler');
 const { authRateLimit, verifyToken } = require('../middleware/auth');
 const logger = require('../utils/logger');
 const { sendPasswordResetEmail, sendPasswordResetOtpEmail } = require('../services/emailService');
 const RoleApproval = require('../models/RoleApproval');
+const { isValidAcademicYearSelection } = require('../services/academicYearService');
 
 const router = express.Router();
 
@@ -68,6 +69,14 @@ const registerValidation = [
     .optional()
     .isInt({ min: 2000, max: 2100 })
     .withMessage('Academic start year must be between 2000 and 2100'),
+
+  body().custom((_, { req }) => {
+    if ((req.body.role || 'student') !== 'student') return true;
+    if (!isValidAcademicYearSelection(req.body.yearOfStudy, req.body.academicStartYear)) {
+      throw new Error('A valid academic year and academic start year are required for students');
+    }
+    return true;
+  }),
   
   body('phone')
     .optional()
@@ -203,6 +212,10 @@ router.post('/register', registerValidation, asyncHandler(async (req, res) => {
       assignedRole = 'student';
       roleAdjusted = true;
     }
+  }
+
+  if (assignedRole === 'student' && !isValidAcademicYearSelection(yearOfStudy, academicStartYear)) {
+    throw new ApiError(400, 'A valid academic year and academic start year are required for student registration');
   }
 
   // Create new user

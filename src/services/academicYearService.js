@@ -39,4 +39,16 @@ function getAcademicYearStatus(user, date = new Date()) {
   };
 }
 
-module.exports = { getAcademicStartYear, getAcademicYearStatus };
+function isValidAcademicYearSelection(yearOfStudy, academicStartYear, date = new Date()) {
+  const year = Number(yearOfStudy);
+  const startYear = Number(academicStartYear);
+  return Number.isInteger(year)
+    && year >= 1
+    && year <= 4
+    && Number.isInteger(startYear)
+    && startYear >= 2000
+    && startYear <= getAcademicStartYear(date)
+    && getAcademicStartYear(date) - startYear + 1 === year;
+}
+
+module.exports = { getAcademicStartYear, getAcademicYearStatus, isValidAcademicYearSelection };

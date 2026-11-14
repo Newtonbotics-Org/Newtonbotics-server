@@ -1,4 +1,8 @@
-const { getAcademicStartYear, getAcademicYearStatus } = require('../../src/services/academicYearService');
+const {
+  getAcademicStartYear,
+  getAcademicYearStatus,
+  isValidAcademicYearSelection,
+} = require('../../src/services/academicYearService');
 const User = require('../../src/models/User');
 
 describe('academic year calculation', () => {
@@ -11,6 +15,18 @@ describe('academic year calculation', () => {
   test('changes academic year at August 10 in India Standard Time', () => {
     expect(getAcademicStartYear(new Date('2026-08-09T18:29:59.999Z'))).toBe(2025);
     expect(getAcademicStartYear(new Date('2026-08-09T18:30:00.000Z'))).toBe(2026);
+  });
+
+  test('accepts only consistent student years 1 through 4', () => {
+    const august10 = new Date('2026-08-09T18:30:00.000Z');
+    expect(isValidAcademicYearSelection(1, 2026, august10)).toBe(true);
+    expect(isValidAcademicYearSelection(2, 2025, august10)).toBe(true);
+    expect(isValidAcademicYearSelection(3, 2024, august10)).toBe(true);
+    expect(isValidAcademicYearSelection(4, 2023, august10)).toBe(true);
+    expect(isValidAcademicYearSelection(undefined, 2026, august10)).toBe(false);
+    expect(isValidAcademicYearSelection(2, undefined, august10)).toBe(false);
+    expect(isValidAcademicYearSelection(5, 2022, august10)).toBe(false);
+    expect(isValidAcademicYearSelection(2, 2024, august10)).toBe(false);
   });
 
   test('advances consistently across leap years and multiple years', () => {
