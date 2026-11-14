@@ -11,6 +11,7 @@ const { getPublicImpactMetrics } = require('../services/impactMetricsService');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { getRedisClient } = require('../config/redis');
 const { getConnectionStatus } = require('../config/database');
+const { getAcademicYearStatus } = require('../services/academicYearService');
 
 const isRedisEnabled = () => process.env.REDIS_ENABLED === 'true';
 
@@ -52,6 +53,7 @@ const publicUserProjection = {
 function mapPublicUser(userDoc, options = {}) {
   const { forceIncludeEmail = false } = options;
   const user = userDoc.toObject({ virtuals: true });
+  const academicYear = getAcademicYearStatus(user);
   const visibility = user.preferences?.privacy?.profileVisibility || 'members';
   const showEmail = forceIncludeEmail || Boolean(user.preferences?.privacy?.showEmail);
   const showPhone = Boolean(user.preferences?.privacy?.showPhone);
@@ -68,6 +70,9 @@ function mapPublicUser(userDoc, options = {}) {
     specialization: user.specialization,
     experienceYears: user.experienceYears,
     department: user.department,
+    yearOfStudy: academicYear.yearOfStudy,
+    isAlumni: academicYear.isAlumni,
+    academicYearReviewRequired: academicYear.academicYearReviewRequired,
     profileImageUrl: user.profileImageUrl,
     bio: user.bio,
     skills: user.skills,
@@ -87,6 +92,7 @@ function mapPublicUser(userDoc, options = {}) {
       displayName: user.displayName,
       role: user.role,
       profileImageUrl: user.profileImageUrl,
+      isAlumni: academicYear.isAlumni,
       ...(forceIncludeEmail && { email: user.email }),
     };
   }
@@ -227,7 +233,14 @@ const getPeopleByRole = (targetRole) => asyncHandler(async (req, res) => {
       User.countDocuments(filter),
     ]);
 
-    const items = users.map(user => mapPublicUser(user, { forceIncludeEmail: true }));
+    const orderedUsers = targetRole === 'team_member'
+      ? [...users].sort((a, b) => {
+        const yearA = getAcademicYearStatus(a).yearOfStudy ?? 99;
+        const yearB = getAcademicYearStatus(b).yearOfStudy ?? 99;
+        return yearA - yearB;
+      })
+      : users;
+    const items = orderedUsers.map(user => mapPublicUser(user, { forceIncludeEmail: true }));
 
     res.json({
       success: true,

@@ -108,6 +108,15 @@ const userSchema = new mongoose.Schema({
       message: 'Year of study must be a whole number'
     }
   },
+  academicStartYear: {
+    type: Number,
+    min: [2000, 'Academic start year must be 2000 or later'],
+    max: [2100, 'Academic start year must be 2100 or earlier'],
+    validate: {
+      validator: Number.isInteger,
+      message: 'Academic start year must be a whole number'
+    }
+  },
   phone: {
     type: String,
     trim: true,

@@ -63,6 +63,11 @@ const registerValidation = [
     .optional()
     .isInt({ min: 1, max: 8 })
     .withMessage('Year of study must be between 1 and 8'),
+
+  body('academicStartYear')
+    .optional()
+    .isInt({ min: 2000, max: 2100 })
+    .withMessage('Academic start year must be between 2000 and 2100'),
   
   body('phone')
     .optional()
@@ -170,6 +175,7 @@ router.post('/register', registerValidation, asyncHandler(async (req, res) => {
     studentId,
     department,
     yearOfStudy,
+    academicStartYear,
     phone
   } = req.body;
 
@@ -209,6 +215,7 @@ router.post('/register', registerValidation, asyncHandler(async (req, res) => {
     studentId,
     department,
     yearOfStudy,
+    academicStartYear,
     phone
   });
 
