@@ -16,6 +16,7 @@ const {
   requireAdmin 
 } = require('../middleware/auth');
 const logger = require('../utils/logger');
+const { getAcademicYearStatus } = require('../services/academicYearService');
 const Project = require('../models/Project');
 const Event = require('../models/Event');
 const Workshop = require('../models/Workshop');
@@ -80,6 +81,11 @@ const createUserValidation = [
     .optional()
     .isInt({ min: 1, max: 8 })
     .withMessage('Year of study must be between 1 and 8'),
+
+  body('academicStartYear')
+    .optional()
+    .isInt({ min: 2000, max: 2100 })
+    .withMessage('Academic start year must be between 2000 and 2100'),
   
   body('phone')
     .optional()
@@ -126,6 +132,11 @@ const updateUserValidation = [
     .optional()
     .isInt({ min: 1, max: 8 })
     .withMessage('Year of study must be between 1 and 8'),
+
+  body('academicStartYear')
+    .optional()
+    .isInt({ min: 2000, max: 2100 })
+    .withMessage('Academic start year must be between 2000 and 2100'),
   
   body('phone')
     .optional()
@@ -473,7 +484,10 @@ router.get('/profile', asyncHandler(async (req, res) => {
         subroles: user.subroles || [],
         studentId: user.studentId,
         department: user.department,
-        yearOfStudy: user.yearOfStudy,
+        yearOfStudy: getAcademicYearStatus(user).yearOfStudy,
+        isAlumni: getAcademicYearStatus(user).isAlumni,
+        academicYearReviewRequired: getAcademicYearStatus(user).academicYearReviewRequired,
+        academicStartYear: user.academicStartYear,
         phone: user.phone,
         profileImageUrl: user.profileImageUrl,
         bio: user.bio,
@@ -555,7 +569,10 @@ router.get('/club-members', asyncHandler(async (req, res) => {
         specialization: user.specialization,
         experienceYears: user.experienceYears,
         department: user.department,
-        yearOfStudy: user.yearOfStudy,
+        yearOfStudy: getAcademicYearStatus(user).yearOfStudy,
+        isAlumni: getAcademicYearStatus(user).isAlumni,
+        academicYearReviewRequired: getAcademicYearStatus(user).academicYearReviewRequired,
+        academicStartYear: user.academicStartYear,
         phone: user.phone,
         profileImageUrl: user.profileImageUrl,
         bio: user.bio,
@@ -672,7 +689,8 @@ router.get('/:id', asyncHandler(async (req, res) => {
         subroles: user.subroles || [],
         studentId: user.studentId,
         department: user.department,
-        yearOfStudy: user.yearOfStudy,
+        yearOfStudy: getAcademicYearStatus(user).yearOfStudy,
+        academicStartYear: user.academicStartYear,
         phone: user.phone,
         profileImageUrl: user.profileImageUrl,
         bio: user.bio,
@@ -712,6 +730,13 @@ router.put('/profile', updateUserValidation, asyncHandler(async (req, res) => {
   
   if (!user) {
     throw notFoundErrorHandler('User');
+  }
+
+  if (Number.isInteger(user.academicStartYear)) {
+    delete updateData.academicStartYear;
+    delete updateData.yearOfStudy;
+  } else if (updateData.academicStartYear === undefined) {
+    delete updateData.yearOfStudy;
   }
 
   // Check if student ID is being updated and if it's already taken

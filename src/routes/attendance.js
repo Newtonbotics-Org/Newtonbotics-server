@@ -5,6 +5,7 @@ const router = express.Router();
 
 const Attendance = require('../models/Attendance');
 const User = require('../models/User');
+const { getAcademicYearStatus } = require('../services/academicYearService');
 const logger = require('../utils/logger');
 const { verifyToken, requireAdmin } = require('../middleware/auth');
 const {
@@ -96,7 +97,7 @@ router.post(
     }
 
     const targetUser = await User.findById(req.body.userId).select(
-      'firstName lastName email role department isActive'
+      'firstName lastName email role department isActive yearOfStudy academicStartYear'
     );
     if (!targetUser) {
       throw notFoundErrorHandler('User');
@@ -106,6 +107,9 @@ router.post(
     }
     if (targetUser.role !== 'team_member') {
       throwValidation('Attendance can only be marked for team members');
+    }
+    if (getAcademicYearStatus(targetUser).isAlumni) {
+      throwValidation('Alumni are not eligible for active-member attendance tracking');
     }
 
     const existingRecord = await Attendance.findOne({
@@ -178,6 +182,12 @@ router.get(
     const filter = {};
     if (userId) filter.userId = userId;
     if (status) filter.status = status;
+    const teamMembers = await User.find({ role: 'team_member' })
+      .select('_id yearOfStudy academicStartYear');
+    const alumniIds = teamMembers
+      .filter((member) => getAcademicYearStatus(member).isAlumni)
+      .map((member) => member._id);
+    filter.userId = { $nin: alumniIds, ...(userId ? { $in: [userId] } : {}) };
     const dateFilter = buildDateFilter({ from, to });
     if (dateFilter) filter.date = dateFilter;
 
