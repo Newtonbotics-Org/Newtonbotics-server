@@ -86,9 +86,9 @@ const projectSchema = new mongoose.Schema({
         if (!value) return false;
         const User = mongoose.model('User');
         const user = await User.findById(value);
-        return user && ['team_member', 'mentor', 'researcher', 'admin'].includes(user.role);
+        return user && user.isActive;
       },
-      message: 'Team leader must be a team member, mentor, researcher, or admin'
+      message: 'Team leader must be an active registered user'
     }
   },
   imageUrl: {

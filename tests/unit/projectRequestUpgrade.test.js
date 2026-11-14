@@ -117,6 +117,63 @@ describe('project request upgrade API', () => {
     expect(ProjectRequest.create.mock.calls[0][0]).not.toHaveProperty('isFeatured');
   });
 
+  it('assigns the authenticated requester as leader and stores selected registered members', async () => {
+    const savedRequest = makeRequest();
+    const memberId = '507f1f77bcf86cd799439013';
+    const selectedMember = { userId: memberId, proposedRole: 'Builder', skills: ['CAD'] };
+    ProjectRequest.create.mockResolvedValue(savedRequest);
+    User.findById.mockResolvedValue({ isActive: true, role: 'team_member' });
+
+    const response = await request(createApp())
+      .post('/project-requests')
+      .set('Authorization', 'Bearer test-token')
+      .send({
+        title: 'Robotics arm project',
+        description: 'Build and test a small robotic arm for laboratory tasks.',
+        teamSize: 2,
+        estimatedDurationMonths: 3,
+        teamLeaderId: '507f1f77bcf86cd799439099',
+        teamMembers: [selectedMember],
+      });
+
+    expect(response.status).toBe(201);
+    expect(ProjectRequest.create).toHaveBeenCalledWith(expect.objectContaining({
+      teamLeaderId: '507f1f77bcf86cd799439012',
+      submittedBy: '507f1f77bcf86cd799439012',
+      teamMembers: [selectedMember],
+    }));
+  });
+
+  it('rejects duplicate or requester IDs in selected team members', async () => {
+    const selectedMember = { userId: '507f1f77bcf86cd799439013', proposedRole: 'Builder' };
+    const app = createApp();
+    const basePayload = {
+      title: 'Robotics arm project',
+      description: 'Build and test a small robotic arm for laboratory tasks.',
+      teamSize: 2,
+      estimatedDurationMonths: 3,
+    };
+
+    const duplicateResponse = await request(app)
+      .post('/project-requests')
+      .set('Authorization', 'Bearer test-token')
+      .send({ ...basePayload, teamMembers: [selectedMember, selectedMember] });
+    const requesterResponse = await request(app)
+      .post('/project-requests')
+      .set('Authorization', 'Bearer test-token')
+      .send({ ...basePayload, teamMembers: [{ ...selectedMember, userId: '507f1f77bcf86cd799439012' }] });
+    User.findById.mockResolvedValue(null);
+    const unknownUserResponse = await request(app)
+      .post('/project-requests')
+      .set('Authorization', 'Bearer test-token')
+      .send({ ...basePayload, teamMembers: [selectedMember] });
+
+    expect(duplicateResponse.status).toBe(400);
+    expect(requesterResponse.status).toBe(400);
+    expect(unknownUserResponse.status).toBe(400);
+    expect(ProjectRequest.create).not.toHaveBeenCalled();
+  });
+
   it('restricts approval to mentor and admin roles', async () => {
     const response = await request(createApp())
       .post('/project-requests/507f1f77bcf86cd799439088/approve')
@@ -140,6 +197,21 @@ describe('project request upgrade API', () => {
     expect(projectRequest.save).not.toHaveBeenCalled();
   });
 
+  it('does not allow request updates to change the requester-assigned leader', async () => {
+    const projectRequest = makeRequest();
+    projectRequest.teamLeaderId = '507f1f77bcf86cd799439099';
+    ProjectRequest.findById.mockResolvedValue(projectRequest);
+
+    const response = await request(createApp())
+      .put('/project-requests/507f1f77bcf86cd799439088')
+      .set('Authorization', 'Bearer test-token')
+      .send({ teamLeaderId: 'not-a-user-id', submittedBy: '507f1f77bcf86cd799439014' });
+
+    expect(response.status).toBe(200);
+    expect(projectRequest.submittedBy).toBe('507f1f77bcf86cd799439012');
+    expect(projectRequest.teamLeaderId).toBe(projectRequest.submittedBy);
+  });
+
   it('ignores public and featured flags on request updates', async () => {
     const projectRequest = makeRequest();
     ProjectRequest.findById.mockResolvedValue(projectRequest);
@@ -156,6 +228,7 @@ describe('project request upgrade API', () => {
 
   it('creates and links one project when a request is approved', async () => {
     const projectRequest = makeRequest();
+    projectRequest.submittedBy = '507f1f77bcf86cd799439014';
     delete projectRequest.teamLeaderId;
     const teamMemberId = '507f1f77bcf86cd799439013';
     projectRequest.teamMembers = [{
@@ -183,7 +256,7 @@ describe('project request upgrade API', () => {
       sourceProjectRequestId: projectRequest._id,
       title: projectRequest.title,
       status: 'upcoming',
-      teamLeaderId: '507f1f77bcf86cd799439012',
+      teamLeaderId: projectRequest.submittedBy,
     }));
     expect(Project.mock.instances[0]).not.toHaveProperty('isPublic');
     expect(Project.mock.instances[0]).not.toHaveProperty('isFeatured');

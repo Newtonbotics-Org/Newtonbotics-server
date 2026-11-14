@@ -28,7 +28,6 @@ const projectRequestFieldValidators = [
   }),
   body('budget').optional({ checkFalsy: true }).isFloat({ min: 0 }).toFloat(),
   body('estimatedHours').optional({ checkFalsy: true }).isInt({ min: 1 }).toInt(),
-  body('teamLeaderId').optional({ checkFalsy: true }).isMongoId(),
   body('mentorId').optional({ checkFalsy: true }).isMongoId(),
   body('imageUrl').optional({ checkFalsy: true }).matches(/^https?:\/\/.+\.(jpg|jpeg|png|gif|webp)$/i).isLength({ max: 500 }),
   body('videoUrl').optional({ checkFalsy: true }).matches(/^https?:\/\/(www\.)?(youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com)\/.+/i).isLength({ max: 500 }),
@@ -38,7 +37,24 @@ const projectRequestFieldValidators = [
   body('achievements.*').optional().isString().isLength({ max: 500 }),
   body('tags').optional().isArray({ max: 50 }),
   body('tags.*').optional().isString().isLength({ max: 50 }),
-  body('teamMembers').optional().isArray({ max: 20 }),
+  body('teamMembers').optional().isArray({ max: 20 }).bail().custom(async (members, { req }) => {
+    const memberIds = members.map(member => member?.userId);
+    if (memberIds.some(id => typeof id !== 'string' || !/^[a-f\d]{24}$/i.test(id))) {
+      throw new Error('Each team member must have a valid user ID');
+    }
+    if (new Set(memberIds).size !== memberIds.length) {
+      throw new Error('Team members cannot contain duplicate users');
+    }
+    if (memberIds.some(id => id === req.user.id.toString())) {
+      throw new Error('The requester is automatically assigned as team leader');
+    }
+    const eligibleRoles = ['team_member', 'mentor', 'researcher', 'admin', 'community'];
+    const users = await Promise.all(memberIds.map(id => User.findById(id)));
+    if (users.some(user => !user || !user.isActive || !eligibleRoles.includes(user.role))) {
+      throw new Error('Team members must be active registered club members');
+    }
+    return true;
+  }),
   body('teamMembers.*.userId').isMongoId(),
   body('teamMembers.*.proposedRole').isString().isLength({ min: 1, max: 100 }),
   body('teamMembers.*.availabilityHoursPerWeek').optional({ checkFalsy: true }).isInt({ min: 1, max: 40 }).toInt(),
@@ -312,7 +328,7 @@ router.post(
     const errors = validationResult(req);
     if (!errors.isEmpty()) throw validationErrorHandler(errors);
     
-    const payload = { ...req.body, submittedBy: req.user.id, submittedAt: new Date(), status: 'pending' };
+    const payload = { ...req.body, teamLeaderId: req.user.id, submittedBy: req.user.id, submittedAt: new Date(), status: 'pending' };
     delete payload.isPublic;
     delete payload.isFeatured;
     delete payload.projectId;
@@ -473,6 +489,10 @@ router.put('/:id', verifyToken, [param('id').isString()],
     // Track changes for audit trail
     const changes = [];
     const updateData = { ...req.body };
+    delete updateData.teamLeaderId;
+    delete updateData.submittedBy;
+    delete updateData.submittedAt;
+    updateData.teamLeaderId = projectRequest.submittedBy;
     delete updateData.isPublic;
     delete updateData.isFeatured;
     delete updateData.projectId;
@@ -679,7 +699,7 @@ router.post('/:id/approve', verifyToken, requireMentor, asyncHandler(async (req,
         endDate: projectRequest.endDate,
         budget: projectRequest.budget ?? projectRequest.budgetEstimate,
         estimatedHours: projectRequest.estimatedHours,
-        teamLeaderId: projectRequest.teamLeaderId || req.user.id,
+        teamLeaderId: projectRequest.submittedBy,
         mentorId: projectRequest.mentorId,
         imageUrl: projectRequest.imageUrl,
         videoUrl: projectRequest.videoUrl,
