@@ -1,7 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const { body, param, query, validationResult } = require('express-validator');
-const { verifyToken } = require('../middleware/auth');
+const { verifyToken, requireAdmin } = require('../middleware/auth');
 const { asyncHandler, validationErrorHandler, notFoundErrorHandler, authorizationErrorHandler, conflictErrorHandler, ApiError } = require('../middleware/errorHandler');
 const ComponentRequest = require('../models/ComponentRequest');
 const Equipment = require('../models/Equipment');
@@ -99,6 +99,84 @@ router.get('/', verifyToken, listValidators, asyncHandler(async (req, res) => {
     ComponentRequest.countDocuments(filter),
   ]);
   res.json({ success: true, data: { items, pagination: { total, limit, skip, hasMore: total > skip + items.length } } });
+}));
+
+router.post('/manual-transfer', verifyToken, requireAdmin, [
+  body('equipmentId').custom(validId).withMessage('Invalid equipment ID'),
+  body('projectId').custom(validId).withMessage('Invalid project ID'),
+  body('quantity').isInt({ min: 1 }).toInt(),
+], asyncHandler(async (req, res) => {
+  checkValidation(req);
+  const session = await mongoose.startSession();
+  let result;
+  try {
+    await session.withTransaction(async () => {
+      const project = await Project.findById(req.body.projectId).session(session);
+      if (!project) throw notFoundErrorHandler('Project');
+      const sourceEquipment = await Equipment.findById(req.body.equipmentId)
+        .populate('categoryId', 'name')
+        .session(session);
+      if (!sourceEquipment) throw notFoundErrorHandler('General Lab component');
+
+      const transferredAt = new Date();
+      const updatedEquipment = await Equipment.findOneAndUpdate(
+        { _id: sourceEquipment._id, currentQuantity: { $gte: req.body.quantity } },
+        { $inc: { currentQuantity: -req.body.quantity } },
+        { new: true, session, runValidators: true },
+      );
+      if (!updatedEquipment) throw new ApiError(409, 'Insufficient General Lab stock for this transfer');
+
+      const nameKey = sourceEquipment.name.trim().toLowerCase();
+      const audit = {
+        action: 'updated',
+        performedBy: req.user.id,
+        performedAt: transferredAt,
+        changes: {
+          source: 'manual_admin_transfer',
+          equipmentId: sourceEquipment._id,
+          projectId: project._id,
+          quantityAdded: req.body.quantity,
+          transferredAt,
+        },
+        ipAddress: req.ip,
+        userAgent: req.get('User-Agent'),
+      };
+      const projectComponent = await ProjectComponent.findOneAndUpdate(
+        { projectId: project._id, nameKey, isDeleted: false },
+        {
+          $inc: { quantity: req.body.quantity },
+          $setOnInsert: {
+            projectId: project._id,
+            name: sourceEquipment.name,
+            nameKey,
+            category: sourceEquipment.categoryId?.name || 'Uncategorized',
+            minimumQuantity: 0,
+            location: sourceEquipment.location || '',
+            description: sourceEquipment.description || '',
+            modelNumber: sourceEquipment.modelNumber,
+            serialNumber: sourceEquipment.serialNumber,
+            manufacturer: sourceEquipment.manufacturer,
+            purchaseDate: sourceEquipment.purchaseDate,
+            purchasePrice: sourceEquipment.purchasePrice,
+            imageUrl: sourceEquipment.imageUrl,
+            specifications: sourceEquipment.specifications,
+            maintenanceSchedule: sourceEquipment.maintenanceSchedule,
+            lastMaintenanceDate: sourceEquipment.lastMaintenanceDate,
+            nextMaintenanceDate: sourceEquipment.nextMaintenanceDate,
+            isDeleted: false,
+          },
+          $push: { auditTrail: audit },
+        },
+        { new: true, upsert: true, session, runValidators: true, setDefaultsOnInsert: true },
+      );
+
+      result = { sourceEquipment: updatedEquipment, projectComponent, quantity: req.body.quantity, transferredAt };
+    }, { readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' }, readPreference: 'primary' });
+  } finally {
+    await session.endSession();
+  }
+
+  res.json({ success: true, message: 'Inventory transferred to project', data: result });
 }));
 
 router.get('/:id', verifyToken, [requestIdParam], asyncHandler(async (req, res) => {
